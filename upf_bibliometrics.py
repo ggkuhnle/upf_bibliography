@@ -18,6 +18,7 @@ import collections
 import csv
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -140,6 +141,33 @@ def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool =
     return works
 
 
+# ── Department extraction ──────────────────────────────────────────────────────
+
+_DEPT_RE = re.compile(
+    r'\b(department|dept\.?|school|faculty|center|centre|division|institute|'
+    r'unit|laboratory|lab|programme?|group|section|college|clinic|service|'
+    r'research\s+\w+)\b',
+    re.IGNORECASE,
+)
+_LEAD_NUM = re.compile(r'^\d+\s*')
+
+
+def extract_department(raw_strings: list) -> str:
+    """
+    Heuristic: scan comma-separated segments of the longest raw affiliation
+    string for one that looks like a department/school/centre.
+    Returns empty string when nothing plausible is found (fail-safe).
+    """
+    if not raw_strings:
+        return ""
+    raw = max(raw_strings, key=len)
+    for part in re.split(r'[,;]', raw):
+        part = _LEAD_NUM.sub("", part).strip()
+        if _DEPT_RE.search(part) and 5 < len(part) < 120:
+            return part
+    return ""
+
+
 # ── Parse and flatten ──────────────────────────────────────────────────────────
 
 def flatten_works(works: list[dict]) -> list[dict]:
@@ -176,6 +204,9 @@ def flatten_works(works: list[dict]) -> list[dict]:
             author = authorship.get("author") or {}
             author_name = author.get("display_name", "")
             author_id = author.get("id", "")
+            department = extract_department(
+                authorship.get("raw_affiliation_strings") or []
+            )
 
             institutions = authorship.get("institutions") or []
             if not institutions:
@@ -188,6 +219,7 @@ def flatten_works(works: list[dict]) -> list[dict]:
                     "author_name": author_name,
                     "author_id": author_id,
                     "institution": "",
+                    "department": department,
                     "country": "",
                 })
             else:
@@ -201,6 +233,7 @@ def flatten_works(works: list[dict]) -> list[dict]:
                         "author_name": author_name,
                         "author_id": author_id,
                         "institution": inst.get("display_name", ""),
+                        "department": department,
                         "country": inst.get("country_code", ""),
                     })
     return rows
@@ -276,6 +309,45 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
 
     return sorted(
         [{"author_id": aid, **v} for aid, v in counter.items()],
+        key=lambda x: x["papers"],
+        reverse=True,
+    )
+
+
+# ── Department aggregation ────────────────────────────────────────────────────
+
+def papers_by_department(rows: list[dict]) -> list[dict]:
+    """
+    Aggregate by (department, institution) pair.
+    Department name is extracted heuristically from raw_affiliation_strings;
+    rows without a detected department are excluded.
+    Results are marked experimental — coverage is partial.
+    """
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        dept = r.get("department", "")
+        if not dept:
+            continue
+        key = (r["work_id"], dept, r["institution"])
+        if key not in seen:
+            seen[key] = {
+                "institution": r["institution"],
+                "country": r["country"],
+                "citations": r["citations"],
+            }
+
+    counter: dict[tuple, dict] = collections.defaultdict(
+        lambda: {"institution": "", "country": "", "papers": 0, "citations": 0}
+    )
+    for (_, dept, inst), meta in seen.items():
+        key = (dept, inst)
+        counter[key]["institution"] = inst
+        counter[key]["country"] = counter[key]["country"] or meta["country"]
+        counter[key]["papers"] += 1
+        counter[key]["citations"] += meta["citations"]
+
+    return sorted(
+        [{"department": k[0], **v} for k, v in counter.items()],
         key=lambda x: x["papers"],
         reverse=True,
     )
@@ -528,6 +600,13 @@ def main() -> None:
         os.path.join(out, "papers_by_author.csv"),
         ["author_id", "author_name", "institution", "country", "papers", "citations"],
         author_tbl,
+    )
+
+    dept_tbl = papers_by_department(rows)
+    write_csv(
+        os.path.join(out, "papers_by_department.csv"),
+        ["department", "institution", "country", "papers", "citations"],
+        dept_tbl,
     )
 
     funder_tbl = papers_by_funder(works)
