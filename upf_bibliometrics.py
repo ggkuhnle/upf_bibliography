@@ -430,6 +430,86 @@ def funding_by_country(works: list[dict], rows: list[dict]) -> list[dict]:
     return sorted(result, key=lambda x: x["papers"], reverse=True)
 
 
+# ── Temporal aggregations ─────────────────────────────────────────────────────
+
+def papers_by_year(works: list[dict]) -> list[dict]:
+    """Annual paper count and total citations."""
+    counter: dict[int, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        year = work.get("publication_year")
+        if year is None:
+            continue
+        counter[year]["papers"] += 1
+        counter[year]["citations"] += work.get("cited_by_count", 0)
+    return sorted([{"year": y, **v} for y, v in counter.items()], key=lambda x: x["year"])
+
+
+def papers_by_country_year(rows: list[dict]) -> list[dict]:
+    """Paper count per (country, year), deduplicated by work_id."""
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["work_id"], r["country"])
+        if key not in seen:
+            seen[key] = {"year": r["year"], "citations": r["citations"]}
+
+    counter: dict[tuple, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for (_, country), meta in seen.items():
+        if not country or meta["year"] is None:
+            continue
+        counter[(country, meta["year"])]["papers"] += 1
+        counter[(country, meta["year"])]["citations"] += meta["citations"]
+
+    return sorted(
+        [{"country": k[0], "year": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["year"], -x["papers"]),
+    )
+
+
+def network_metrics_by_year(rows: list[dict]) -> list[dict]:
+    """
+    Cumulative co-authorship network size by year.
+    For each year: total papers published up to that year, unique authors seen,
+    and unique author-pair collaborations seen.
+    """
+    work_info: dict[str, dict] = {}
+    for r in rows:
+        wid = r["work_id"]
+        if wid not in work_info:
+            work_info[wid] = {"year": r["year"], "authors": set()}
+        if r["author_id"]:
+            work_info[wid]["authors"].add(r["author_id"])
+
+    by_year: dict[int, list] = collections.defaultdict(list)
+    for info in work_info.values():
+        if info["year"] is not None:
+            by_year[info["year"]].append(info["authors"])
+
+    cumulative_authors: set = set()
+    cumulative_edges: set = set()
+    cumulative_papers = 0
+    results = []
+
+    for year in sorted(by_year.keys()):
+        yearly_papers = 0
+        for authors in by_year[year]:
+            cumulative_papers += 1
+            yearly_papers += 1
+            cumulative_authors.update(authors)
+            al = list(authors)
+            for i in range(len(al)):
+                for j in range(i + 1, len(al)):
+                    cumulative_edges.add((min(al[i], al[j]), max(al[i], al[j])))
+        results.append({
+            "year": year,
+            "papers_this_year": yearly_papers,
+            "cumulative_papers": cumulative_papers,
+            "cumulative_authors": len(cumulative_authors),
+            "cumulative_edges": len(cumulative_edges),
+        })
+
+    return results
+
+
 # ── Co-authorship edge list ────────────────────────────────────────────────────
 
 def coauthorship_edges(rows: list[dict]) -> list[dict]:
@@ -620,6 +700,25 @@ def main() -> None:
         os.path.join(out, "funding_by_country.csv"),
         ["country", "papers", "funded_papers", "pct_funded", "citations"],
         funding_country_tbl,
+    )
+
+    year_tbl = papers_by_year(works)
+    write_csv(
+        os.path.join(out, "papers_by_year.csv"),
+        ["year", "papers", "citations"],
+        year_tbl,
+    )
+    country_year_tbl = papers_by_country_year(rows)
+    write_csv(
+        os.path.join(out, "papers_by_country_year.csv"),
+        ["country", "year", "papers", "citations"],
+        country_year_tbl,
+    )
+    net_metrics_tbl = network_metrics_by_year(rows)
+    write_csv(
+        os.path.join(out, "network_metrics_by_year.csv"),
+        ["year", "papers_this_year", "cumulative_papers", "cumulative_authors", "cumulative_edges"],
+        net_metrics_tbl,
     )
 
     edges = coauthorship_edges(rows)
