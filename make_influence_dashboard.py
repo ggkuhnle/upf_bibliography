@@ -66,6 +66,7 @@ top_works["hover"] = top_works.apply(
     ), axis=1
 )
 
+_max1 = int(top_works["times_cited_by_upf"].max())
 fig1 = go.Figure(go.Bar(
     x=top_works["times_cited_by_upf"],
     y=top_works["label"],
@@ -73,17 +74,19 @@ fig1 = go.Figure(go.Bar(
     marker_color=top_works["times_cited_by_upf"],
     marker_colorscale="Blues",
     marker_showscale=False,
-    text=top_works["times_cited_by_upf"].astype(int),
-    textposition="outside",
+    text=top_works["times_cited_by_upf"].apply(lambda v: f"{int(v):,}"),
+    textposition="inside",
+    insidetextanchor="end",
+    textfont=dict(color="white", size=10),
     hovertext=top_works["hover"],
     hoverinfo="text",
 ))
 fig1.update_layout(
     title=f"Top {TOP_N} Works Cited by UPF Literature",
-    xaxis_title="Times cited by UPF papers",
+    xaxis=dict(title="Times cited by UPF papers", range=[0, _max1 * 1.05]),
     yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
     height=max(500, TOP_N * 26),
-    margin=dict(l=260, r=60, t=50, b=40),
+    margin=dict(l=260, r=40, t=50, b=40),
     template="plotly_white",
 )
 
@@ -102,22 +105,25 @@ ext["hover"] = ext.apply(
     ), axis=1
 )
 
+_max2 = int(ext["times_cited_total"].max())
 fig2 = go.Figure(go.Bar(
     x=ext["times_cited_total"],
     y=ext["author_name"],
     orientation="h",
     marker_color="#9b59b6",
-    text=ext["times_cited_total"].astype(int),
-    textposition="outside",
+    text=ext["times_cited_total"].apply(lambda v: f"{int(v):,}"),
+    textposition="inside",
+    insidetextanchor="end",
+    textfont=dict(color="white", size=10),
     hovertext=ext["hover"],
     hoverinfo="text",
 ))
 fig2.update_layout(
     title="External Influencers — Cited in UPF Literature but Not UPF Authors",
-    xaxis_title="Total citations in UPF papers",
+    xaxis=dict(title="Total citations in UPF papers", range=[0, _max2 * 1.05]),
     yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
     height=max(400, len(ext) * 26 + 80),
-    margin=dict(l=200, r=60, t=50, b=40),
+    margin=dict(l=200, r=40, t=50, b=40),
     template="plotly_white",
 )
 
@@ -145,22 +151,24 @@ fig3 = px.scatter(
     x="times_cited_total",
     y="cit_per_work",
     color="category",
-    size="works_cited",
-    size_max=20,
     color_discrete_map={"UPF researcher": "#2980b9", "External voice": "#9b59b6"},
     hover_name="author_name",
-    custom_data=["hover"],
+    custom_data=["hover", "works_cited"],
     log_x=True,
     log_y=True,
+    opacity=0.7,
     title="Citation Influence: UPF Researchers vs External Voices",
     labels={
         "times_cited_total": "Total citations in UPF papers (log)",
         "cit_per_work":      "Citations per work (log)",
     },
     template="plotly_white",
-    height=500,
+    height=520,
 )
-fig3.update_traces(hovertemplate="%{customdata[0]}<extra></extra>")
+fig3.update_traces(
+    marker=dict(size=8, line=dict(width=0.5, color="white")),
+    hovertemplate="%{customdata[0]}<br>Works cited: %{customdata[1]}<extra></extra>",
+)
 
 # ── Figure 4: Top UPF insiders by citation influence ─────────────────────────
 insiders = authors_df[authors_df["in_upf_literature"] == True].head(TOP_N).copy()
@@ -172,22 +180,25 @@ insiders["hover"] = insiders.apply(
     ), axis=1
 )
 
+_max4 = int(insiders["times_cited_total"].max())
 fig4 = go.Figure(go.Bar(
     x=insiders["times_cited_total"],
     y=insiders["author_name"],
     orientation="h",
     marker_color="#2980b9",
-    text=insiders["times_cited_total"].astype(int),
-    textposition="outside",
+    text=insiders["times_cited_total"].apply(lambda v: f"{int(v):,}"),
+    textposition="inside",
+    insidetextanchor="end",
+    textfont=dict(color="white", size=10),
     hovertext=insiders["hover"],
     hoverinfo="text",
 ))
 fig4.update_layout(
     title=f"Top {TOP_N} UPF Researchers by Citation Impact",
-    xaxis_title="Total citations in UPF papers",
+    xaxis=dict(title="Total citations in UPF papers", range=[0, _max4 * 1.05]),
     yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
     height=max(500, TOP_N * 26),
-    margin=dict(l=200, r=60, t=50, b=40),
+    margin=dict(l=200, r=40, t=50, b=40),
     template="plotly_white",
 )
 
@@ -336,7 +347,7 @@ html = f"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>UPF Influence Analysis Dashboard</title>
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+<script src="https://cdn.plot.ly/plotly-3.5.0.min.js" charset="utf-8"></script>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;

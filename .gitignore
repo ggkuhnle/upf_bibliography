@@ -1,9 +1,29 @@
-#output/
-#data/
-logs/
+# Environment & secrets
+.env
+*.env
+
+# Claude Code internals
+.claude/
+CLAUDE.md
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+venv/
+.venv/
+
+# Notebooks
+notebooks/.ipynb_checkpoints/
+
+# Logs & temp
+logs/
+*.log
+
+# OS
 .DS_Store
-CLAUDE.md
-.claude
+Thumbs.db
+
+# Data directory (input data not committed)
+data/
 

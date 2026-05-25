@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UPF Bibliometrics — Ultra-Processed Food Research Analysis</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       background:#f5f6fa;color:#2c3e50;line-height:1.6}
+
+  /* Header */
+  #hdr{background:linear-gradient(135deg,#1a2742 0%,#2c4a8a 100%);
+       color:#fff;padding:48px 32px 40px;text-align:center}
+  #hdr h1{font-size:2rem;font-weight:800;letter-spacing:-.5px;margin-bottom:10px}
+  #hdr p.sub{font-size:1.05rem;opacity:.80;max-width:640px;margin:0 auto 28px}
+
+  /* Stats bar */
+  .stats{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;
+         max-width:700px;margin:0 auto}
+  .stat{background:rgba(255,255,255,.12);border-radius:10px;padding:12px 24px;
+        text-align:center;min-width:120px}
+  .stat .n{font-size:1.8rem;font-weight:700;display:block}
+  .stat .l{font-size:.78rem;opacity:.75;text-transform:uppercase;letter-spacing:.5px}
+
+  /* Main */
+  main{max-width:900px;margin:0 auto;padding:36px 24px 80px}
+
+  /* Cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;
+        margin-bottom:48px}
+  .card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
+        overflow:hidden;display:flex;flex-direction:column;
+        transition:transform .15s,box-shadow .15s}
+  .card:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+  .card-accent{height:5px}
+  .card-body{padding:20px 22px;flex:1}
+  .card-body h2{font-size:1.05rem;font-weight:700;color:#1a2742;margin-bottom:8px}
+  .card-body p{font-size:.88rem;color:#555;line-height:1.55}
+  .card-body ul{font-size:.84rem;color:#555;padding-left:16px;margin-top:8px}
+  .card-body li{margin-bottom:4px}
+  .card-foot{padding:14px 22px;border-top:1px solid #eee;
+             display:flex;justify-content:flex-end}
+  .btn{display:inline-block;padding:7px 18px;border-radius:20px;
+       font-size:.82rem;font-weight:600;text-decoration:none;
+       transition:opacity .15s}
+  .btn:hover{opacity:.85}
+
+  /* Colour accents */
+  .c-blue{background:#2980b9}.btn-blue{background:#2980b9;color:#fff}
+  .c-teal{background:#16a085}.btn-teal{background:#16a085;color:#fff}
+  .c-purple{background:#8e44ad}.btn-purple{background:#8e44ad;color:#fff}
+  .c-rose{background:#e84393}.btn-rose{background:#e84393;color:#fff}
+  .c-orange{background:#e67e22}.btn-orange{background:#e67e22;color:#fff}
+
+  /* Section headings */
+  h3.sec{font-size:1rem;font-weight:700;color:#888;text-transform:uppercase;
+          letter-spacing:1px;margin-bottom:16px;padding-bottom:6px;
+          border-bottom:2px solid #eee}
+
+  /* Source / methods box */
+  .methods{background:#fff;border-radius:10px;padding:24px 28px;
+           box-shadow:0 2px 8px rgba(0,0,0,.07);margin-top:8px}
+  .methods h3{font-size:1rem;color:#1a2742;font-weight:700;margin-bottom:10px}
+  .methods p,.methods li{font-size:.875rem;color:#555;line-height:1.6}
+  .methods ul{padding-left:18px;margin-top:6px}
+  .methods code{background:#f0f2f6;padding:1px 5px;border-radius:3px;
+                font-size:.82rem;font-family:monospace}
+
+  footer{text-align:center;padding:24px;font-size:.78rem;color:#aaa}
+  a{color:inherit}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>Ultra-Processed Food Research — Bibliometric Analysis</h1>
+  <p class="sub">
+    Who publishes UPF research, where does it come from, and whose ideas does it build on?
+    An open analysis of the full global literature using OpenAlex.
+  </p>
+  <div class="stats">
+    <div class="stat"><span class="n">6,935</span><span class="l">Papers</span></div>
+    <div class="stat"><span class="n">20,495</span><span class="l">Authors</span></div>
+    <div class="stat"><span class="n">146</span><span class="l">Countries</span></div>
+    <div class="stat"><span class="n">4,383</span><span class="l">Institutions</span></div>
+  </div>
+</div>
+
+<main>
+
+  <h3 class="sec" style="margin-top:8px">Dashboards</h3>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-accent c-blue"></div>
+      <div class="card-body">
+        <h2>Research Overview</h2>
+        <p>Publications by country, institution and author. Year-by-year growth of the field and co-authorship network statistics.</p>
+        <ul>
+          <li>Top countries &amp; institutions</li>
+          <li>Temporal trends (2000–2024)</li>
+          <li>Author rankings</li>
+          <li>Network metrics over time</li>
+        </ul>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-blue" href="output/upf_dashboard.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-accent c-teal"></div>
+      <div class="card-body">
+        <h2>Co-authorship Network</h2>
+        <p>Interactive explorer: watch the collaboration network evolve year by year. Filter by minimum papers, search for an author, explore their connections.</p>
+        <ul>
+          <li>Year slider (2007–2024)</li>
+          <li>Author search &amp; highlight</li>
+          <li>Min-papers threshold</li>
+          <li>Community colour-coding</li>
+        </ul>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-teal" href="output/network_interactive.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-accent c-purple"></div>
+      <div class="card-body">
+        <h2>Influence Analysis</h2>
+        <p>Which works and authors are cited most often by UPF papers? Separates researchers inside the field from external voices whose ideas it borrows.</p>
+        <ul>
+          <li>Most-cited foundational works</li>
+          <li>External influencers (non-UPF authors)</li>
+          <li>Inside vs outside citation scatter</li>
+          <li>Top UPF researchers by impact</li>
+        </ul>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-purple" href="output/influence_dashboard.html">Open →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-accent c-rose"></div>
+      <div class="card-body">
+        <h2>World Map</h2>
+        <p>Global distribution of UPF research institutions. Circle size is proportional to publication output — Brazil's dominance is striking.</p>
+        <ul>
+          <li>Institution-level bubbles</li>
+          <li>Colour-coded by region</li>
+          <li>Hover for papers &amp; citations</li>
+        </ul>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-rose" href="output/world_map.html">Open →</a>
+      </div>
+    </div>
+
+  </div>
+
+  <h3 class="sec">Static map (Substack / publication use)</h3>
+  <div style="margin-bottom:48px">
+    <a href="output/world_map.png" target="_blank">
+      <img src="output/world_map.png" alt="Global UPF Research Landscape"
+           style="width:100%;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);
+                  display:block">
+    </a>
+    <p style="font-size:.8rem;color:#888;margin-top:8px;text-align:center">
+      Click to open full-resolution PNG
+    </p>
+  </div>
+
+  <h3 class="sec">Methods &amp; Data</h3>
+  <div class="methods">
+    <h3>Data source</h3>
+    <p>
+      All publication data is retrieved from <a href="https://openalex.org" style="color:#2980b9">OpenAlex</a>
+      — an open, freely accessible scholarly database.  No API key is required.
+      Papers are identified by searching titles and abstracts for
+      <code>ultra-processed</code>, <code>ultraprocessed</code>, and <code>NOVA classification</code>.
+    </p>
+
+    <h3 style="margin-top:16px">Coverage</h3>
+    <p>
+      The corpus covers papers published through mid-2025.
+      Institutional affiliation and country are as recorded in OpenAlex; a small fraction
+      of papers (~2 %) lack affiliation data.
+    </p>
+
+    <h3 style="margin-top:16px">Caveats</h3>
+    <ul>
+      <li>Author-name disambiguation is handled by OpenAlex; occasional mis-attribution may occur.</li>
+      <li>Funding data is incomplete — many papers have no recorded funder.</li>
+      <li>The influence analysis counts citations within the UPF corpus only, not global citations.</li>
+      <li>Books and grey literature are poorly indexed and will be under-represented.</li>
+    </ul>
+
+    <h3 style="margin-top:16px">Code</h3>
+    <p>
+      All code is open-source.
+      Scripts: <code>upf_bibliometrics.py</code> (data retrieval),
+      <code>influence_analysis.py</code> (reference network),
+      <code>make_interactive_network.py</code>, <code>make_influence_dashboard.py</code>,
+      <code>make_world_map.py</code> (visualisations).
+      See <a href="https://github.com/ggkuhnle/upf_bibliography" style="color:#2980b9">GitHub</a> for full source.
+    </p>
+  </div>
+
+</main>
+
+<footer>
+  Data: <a href="https://openalex.org">OpenAlex</a> · Analysis by G. Kuhnle ·
+  Generated May 2025
+</footer>
+
+</body>
+</html>
