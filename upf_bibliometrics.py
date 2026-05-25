@@ -512,6 +512,49 @@ def network_metrics_by_year(rows: list[dict]) -> list[dict]:
 
 # ── Co-authorship edge list ────────────────────────────────────────────────────
 
+def coauthorship_edges_by_year(rows: list[dict]) -> list[dict]:
+    """
+    One row per (author1, author2, year): papers they co-authored in that year.
+    Useful for building cumulative year-by-year network animation snapshots.
+    """
+    work_info: dict[str, dict] = {}
+    for r in rows:
+        wid = r["work_id"]
+        if wid not in work_info:
+            work_info[wid] = {"year": r["year"], "authors": {}}
+        if r["author_id"] and r["author_id"] not in work_info[wid]["authors"]:
+            work_info[wid]["authors"][r["author_id"]] = r["author_name"]
+
+    pair_year: dict[tuple, int] = collections.defaultdict(int)
+    for info in work_info.values():
+        year = info["year"]
+        if year is None:
+            continue
+        ids = list(info["authors"].keys())
+        names = info["authors"]
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                a, b = ids[i], ids[j]
+                if a > b:
+                    a, b = b, a
+                pair_year[(a, b, year)] += 1
+
+    # Attach names (from the aggregated authors table is cleaner; here we re-derive)
+    name_map: dict[str, str] = {}
+    for r in rows:
+        if r["author_id"] and r["author_id"] not in name_map:
+            name_map[r["author_id"]] = r["author_name"]
+
+    result = []
+    for (a, b, year), papers in pair_year.items():
+        result.append({
+            "author1_id": a, "author1_name": name_map.get(a, ""),
+            "author2_id": b, "author2_name": name_map.get(b, ""),
+            "year": year, "papers": papers,
+        })
+    return sorted(result, key=lambda x: (x["year"], -x["papers"]))
+
+
 def coauthorship_edges(rows: list[dict]) -> list[dict]:
     """
     Return one row per ordered pair of co-authors on the same paper.
@@ -719,6 +762,13 @@ def main() -> None:
         os.path.join(out, "network_metrics_by_year.csv"),
         ["year", "papers_this_year", "cumulative_papers", "cumulative_authors", "cumulative_edges"],
         net_metrics_tbl,
+    )
+
+    edges_by_year = coauthorship_edges_by_year(rows)
+    write_csv(
+        os.path.join(out, "coauthorship_edges_by_year.csv"),
+        ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
+        edges_by_year,
     )
 
     edges = coauthorship_edges(rows)
