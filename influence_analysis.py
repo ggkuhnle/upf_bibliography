@@ -43,6 +43,22 @@ from datetime import datetime
 
 import requests
 
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader — sets os.environ for KEY=VALUE lines."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 DEFAULT_TERMS = [
@@ -421,12 +437,17 @@ def parse_args():
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    args  = parse_args()
-    out   = args.output_dir
-    sess  = _session()
+    _load_dotenv()
+    args = parse_args()
+    out  = args.output_dir
+    sess = _session()
 
-    if args.skip_refs and not args.altmetric_key:
-        print("Nothing to do: --skip-refs with no --altmetric-key supplied.")
+    # Key resolution: CLI arg → .env / environment variable
+    altmetric_key = args.altmetric_key or os.environ.get("ALTMETRIC_KEY", "")
+
+    if args.skip_refs and not altmetric_key:
+        print("Nothing to do: --skip-refs with no Altmetric key available "
+              "(set ALTMETRIC_KEY in .env or pass --altmetric-key).")
         return
 
     # ── Phase 0: fetch papers (needed by both parts) ──────────────────────────
@@ -463,17 +484,17 @@ def main():
         print_ref_summary(cited_works, cited_authors)
 
     # ── Phase 2: Altmetric ─────────────────────────────────────────────────────
-    if args.altmetric_key:
+    if altmetric_key:
         fetch_altmetric_scores(
             works,
-            api_key=args.altmetric_key,
+            api_key=altmetric_key,
             out_path=os.path.join(out, "altmetric_scores.csv"),
         )
     else:
         log.info(
-            "Altmetric scores skipped (no --altmetric-key provided).\n"
+            "Altmetric scores skipped — no key found.\n"
             "  Register free at: https://www.altmetric.com/solutions/altmetric-api/\n"
-            "  Then re-run with: python influence_analysis.py --skip-refs --altmetric-key YOUR_KEY"
+            "  Then add ALTMETRIC_KEY=yourkey to .env, or pass --altmetric-key KEY"
         )
 
 
