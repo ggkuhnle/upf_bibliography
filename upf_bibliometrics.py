@@ -110,7 +110,7 @@ def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool =
             "mailto": MAILTO,
             "select": (
                 "id,doi,title,publication_year,"
-                "cited_by_count,authorships"
+                "cited_by_count,authorships,funders,awards"
             ),
         }
 
@@ -279,6 +279,83 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
         key=lambda x: x["papers"],
         reverse=True,
     )
+
+
+# ── Funding aggregation ───────────────────────────────────────────────────────
+
+def papers_by_funder(works: list[dict]) -> list[dict]:
+    """
+    Aggregate funded papers by funder.
+    OpenAlex `funders` field: list of {id, display_name, ror}.
+    A paper with multiple funders contributes once to each funder's count.
+    Citations are attributed once per (work_id, funder) pair.
+    """
+    seen: dict[tuple, dict] = {}
+    for work in works:
+        work_id = work.get("id", "")
+        citations = work.get("cited_by_count", 0)
+        for funder in work.get("funders") or []:
+            funder_id   = funder.get("id", "")
+            funder_name = funder.get("display_name", "")
+            if not funder_name:
+                continue
+            key = (work_id, funder_id or funder_name)
+            if key not in seen:
+                seen[key] = {"funder_id": funder_id, "funder_name": funder_name,
+                             "citations": citations}
+
+    counter: dict[str, dict] = collections.defaultdict(
+        lambda: {"funder_name": "", "papers": 0, "citations": 0}
+    )
+    for (_, fid), meta in seen.items():
+        key = fid or meta["funder_name"]
+        counter[key]["funder_name"] = meta["funder_name"]
+        counter[key]["papers"]    += 1
+        counter[key]["citations"] += meta["citations"]
+
+    return sorted(
+        [{"funder_id": fid, **v} for fid, v in counter.items()],
+        key=lambda x: x["papers"],
+        reverse=True,
+    )
+
+
+def funding_by_country(works: list[dict], rows: list[dict]) -> list[dict]:
+    """
+    For each country: how many of its papers acknowledged any external funding.
+    Uses the authorships rows to map work_id → country, and grants to flag funding.
+    """
+    funded_works = {
+        w["id"] for w in works
+        if w.get("funders")
+    }
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["work_id"], r["country"])
+        if key not in seen:
+            seen[key] = {
+                "citations": r["citations"],
+                "funded": r["work_id"] in funded_works,
+            }
+
+    country_total: dict[str, dict] = collections.defaultdict(
+        lambda: {"papers": 0, "funded": 0, "citations": 0}
+    )
+    for (_, country), meta in seen.items():
+        if not country:
+            continue
+        country_total[country]["papers"]    += 1
+        country_total[country]["citations"] += meta["citations"]
+        if meta["funded"]:
+            country_total[country]["funded"] += 1
+
+    result = []
+    for country, v in country_total.items():
+        pct = round(100 * v["funded"] / v["papers"], 1) if v["papers"] else 0
+        result.append({"country": country, "papers": v["papers"],
+                        "funded_papers": v["funded"], "pct_funded": pct,
+                        "citations": v["citations"]})
+    return sorted(result, key=lambda x: x["papers"], reverse=True)
 
 
 # ── Co-authorship edge list ────────────────────────────────────────────────────
@@ -451,6 +528,19 @@ def main() -> None:
         os.path.join(out, "papers_by_author.csv"),
         ["author_id", "author_name", "institution", "country", "papers", "citations"],
         author_tbl,
+    )
+
+    funder_tbl = papers_by_funder(works)
+    write_csv(
+        os.path.join(out, "papers_by_funder.csv"),
+        ["funder_id", "funder_name", "papers", "citations"],
+        funder_tbl,
+    )
+    funding_country_tbl = funding_by_country(works, rows)
+    write_csv(
+        os.path.join(out, "funding_by_country.csv"),
+        ["country", "papers", "funded_papers", "pct_funded", "citations"],
+        funding_country_tbl,
     )
 
     edges = coauthorship_edges(rows)
