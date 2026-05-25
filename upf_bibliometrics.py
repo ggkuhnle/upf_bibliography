@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 upf_bibliometrics.py
 Retrieve ultra-processed food literature from OpenAlex and produce ranked
