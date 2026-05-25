@@ -15,6 +15,7 @@ venv/
 
 # Notebooks
 notebooks/.ipynb_checkpoints/
+notebooks/*.html
 
 # Logs & temp
 logs/
