@@ -24,7 +24,15 @@ import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-DEFAULT_TERMS = ["ultra-processed", "ultraprocessed", "NOVA classification"]
+DEFAULT_TERMS = [
+    "ultra-processed food",
+    "ultra-processed foods",
+    "ultraprocessed food",
+    "ultraprocessed foods",
+    "ultra-processed diet",
+    "ultraprocessed diet",
+    "NOVA food classification",
+]
 DEFAULT_OUTPUT_DIR = "output"
 MAILTO = "g.kuhnle@reading.ac.uk"
 BASE_URL = "https://api.openalex.org/works"

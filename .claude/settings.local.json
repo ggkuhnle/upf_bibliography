@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(awk -F',' 'NR>1 && $1!=\"\" {sum+=$2} END {print \"Papers with country: \" sum}' /Users/gunter/Documents/upf_bibliography/output/papers_by_country.csv)",
+      "Bash(awk -F',' '$1==\"\"' /Users/gunter/Documents/upf_bibliography/output/papers_by_country.csv)",
+      "Bash(awk -F',' 'NR>1 && $6+0 > 500' /Users/gunter/Documents/upf_bibliography/output/papers_by_author.csv)"
     ]
   }
 }
