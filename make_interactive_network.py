@@ -168,7 +168,8 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 .cg label{{font-size:0.7rem;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}}
 .cg-row{{display:flex;align-items:center;gap:8px}}
 #yr-val{{font-size:1.15rem;font-weight:800;color:#1a2742;min-width:3rem}}
-#yr-sl{{width:260px;accent-color:#1a2742;cursor:pointer}}
+#yr-sl,#minpap-sl{{width:200px;accent-color:#1a2742;cursor:pointer}}
+#minpap-val{{font-size:1.05rem;font-weight:700;color:#1a2742;min-width:1.8rem}}
 #auth-in{{padding:6px 10px;border:1px solid #c8ced5;border-radius:5px;font-size:0.88rem;width:210px;outline:none}}
 #auth-in:focus{{border-color:#1a2742;box-shadow:0 0 0 2px rgba(26,39,66,.12)}}
 #srch-wrap{{position:relative}}
@@ -223,6 +224,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
       <div id="auth-dd"></div>
     </div>
   </div>
+  <div class="cg">
+    <label>Min. papers per author</label>
+    <div class="cg-row">
+      <span id="minpap-val">3</span>
+      <input type="range" id="minpap-sl" min="3" max="30" value="3" step="1">
+    </div>
+  </div>
   <button id="clear-btn">Clear highlight</button>
   <div id="stats">hover or click a node to explore</div>
 </div>
@@ -259,6 +267,7 @@ EDGES.forEach(([a,b,yr,pap]) => {{
 // ── State ─────────────────────────────────────────────────────────────────────
 let curYear = MAX_YR;
 let hlNode  = null;  // integer index or null
+let minPap  = 3;
 
 // ── Active nodes / edges for a given year ─────────────────────────────────────
 function activeSet(year) {{
@@ -270,8 +279,16 @@ function activeSet(year) {{
 }}
 
 // ── Build Plotly traces ───────────────────────────────────────────────────────
-function buildTraces(year, hl) {{
-  const {{nodes: activeNodes, edges: activeEdges}} = activeSet(year);
+function buildTraces(year, hl, minPap=3) {{
+  // Active nodes/edges: within year AND meeting minPap threshold
+  const activeNodes = new Set();
+  const activeEdges = [];
+  EDGES.forEach(([a,b,yr,pap]) => {{
+    if (yr <= year && NODES[a].pap >= minPap && NODES[b].pap >= minPap) {{
+      activeNodes.add(a); activeNodes.add(b);
+      activeEdges.push([a,b,pap]);
+    }}
+  }});
 
   // When highlighting: neighbours of hl node (in active set)
   const hlNeighbours = new Set();
@@ -330,8 +347,12 @@ const config = {{
   modeBarButtonsToRemove:['select2d','lasso2d','toggleSpikelines','autoScale2d'],
 }};
 
-function updateStats(year) {{
-  const {{nodes, edges}} = activeSet(year);
+function updateStats(year, minPap=3) {{
+  const nodes = new Set(), edges = [];
+  EDGES.forEach(([a,b,yr]) => {{
+    if (yr <= year && NODES[a].pap >= minPap && NODES[b].pap >= minPap)
+      {{ nodes.add(a); nodes.add(b); edges.push(1); }}
+  }});
   document.getElementById('stats').textContent =
     `${{nodes.size}} authors · ${{edges.length}} collaborations`;
   document.getElementById('hdr-stats').textContent =
@@ -339,8 +360,8 @@ function updateStats(year) {{
 }}
 
 // ── Initial render ────────────────────────────────────────────────────────────
-Plotly.newPlot('net', buildTraces(curYear, null), layout, config);
-updateStats(curYear);
+Plotly.newPlot('net', buildTraces(curYear, null, minPap), layout, config);
+updateStats(curYear, minPap);
 
 // ── Year slider ───────────────────────────────────────────────────────────────
 const slEl = document.getElementById('yr-sl');
@@ -351,8 +372,8 @@ slEl.addEventListener('input', () => {{
   clearTimeout(slTimer);
   slTimer = setTimeout(() => {{
     curYear = +slEl.value;
-    Plotly.react('net', buildTraces(curYear, hlNode), layout);
-    updateStats(curYear);
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
+    updateStats(curYear, minPap);
     if (hlNode !== null) refreshPanel(hlNode);
   }}, 60);
 }});
@@ -398,7 +419,7 @@ document.getElementById('net').on('plotly_click', data => {{
 function pickAuthor(idx) {{
   hlNode = idx;
   authIn.value = NODES[idx].name;
-  Plotly.react('net', buildTraces(curYear, hlNode), layout);
+  Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
   refreshPanel(idx);
 }}
 
@@ -450,9 +471,27 @@ document.getElementById('close-btn').addEventListener('click', () => {{
 
 document.getElementById('clear-btn').addEventListener('click', () => {{
   hlNode = null; authIn.value = '';
-  Plotly.react('net', buildTraces(curYear, null), layout);
+  Plotly.react('net', buildTraces(curYear, null, minPap), layout);
   document.getElementById('panel').style.display = 'none';
   document.getElementById('stats').textContent = 'hover or click a node to explore';
+}});
+
+// ── Min-papers slider ────────────────────────────────────────────────────────
+const minPapSl  = document.getElementById('minpap-sl');
+const minPapVal = document.getElementById('minpap-val');
+let minPapTimer = null;
+minPapSl.addEventListener('input', () => {{
+  minPapVal.textContent = minPapSl.value;
+  clearTimeout(minPapTimer);
+  minPapTimer = setTimeout(() => {{
+    minPap = +minPapSl.value;
+    if (hlNode !== null && NODES[hlNode].pap < minPap) {{
+      hlNode = null; authIn.value = '';
+      document.getElementById('panel').style.display = 'none';
+    }}
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
+    updateStats(curYear, minPap);
+  }}, 60);
 }});
 </script>
 </body>
