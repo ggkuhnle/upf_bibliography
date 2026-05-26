@@ -23,6 +23,7 @@ def _args():
     p = argparse.ArgumentParser()
     p.add_argument("--primary", action="store_true",
                    help="Use first↔last-author edges (filters honorary middle authors)")
+    p.add_argument("--output-dir", default="output")
     return p.parse_args()
 
 _ARGS = _args()
@@ -43,7 +44,7 @@ def _pf(name):
     return f"{_PREFIX}_{name}" if _PREFIX else name
 
 # ── Config ────────────────────────────────────────────────────────────────────
-OUTPUT_DIR  = "output"
+OUTPUT_DIR  = _ARGS.output_dir
 _suffix     = "_primary" if _ARGS.primary else ""
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf(f"network_interactive{_suffix}.html"))
 MIN_PAPERS  = 3
