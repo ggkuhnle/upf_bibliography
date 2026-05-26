@@ -208,7 +208,7 @@ html = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UPF Co-authorship — Study Type Network</title>
+<title>{_TITLE} — Study Type Network</title>
 <script src="https://cdn.plot.ly/plotly-3.5.0.min.js" charset="utf-8"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -266,7 +266,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 {DISCLAIMER}
 <div id="hdr">
   <div>
-    <h1>UPF Co-authorship — Study Type Network</h1>
+    <h1>{_TITLE} — Study Type Network</h1>
     <p>Node shape &amp; colour = author's dominant study type · OpenAlex</p>
   </div>
   <div class="spacer"></div>
@@ -557,7 +557,7 @@ function refreshPanel(idx) {{
     ['Institution',          n.inst||'—'],
     ['Country',              n.ctr||'—'],
     ['Dominant study type',  stName],
-    ['Papers (UPF)',         n.pap],
+    ['Papers',               n.pap],
     ['Citations',            n.cit.toLocaleString()],
     ['Co-authors (network)', Object.keys(adj[idx]).length],
   ];

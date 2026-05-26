@@ -291,6 +291,41 @@ def papers_by_institution(rows: list[dict]) -> list[dict]:
     )
 
 
+def _load_aliases() -> dict:
+    """Load aliases.json if present.
+
+    Format::
+
+        {
+          "aliases": [
+            {
+              "canonical_id":   "https://openalex.org/A5046912319",
+              "canonical_name": "Jeremy P.E. Spencer",
+              "duplicate_ids":  [
+                "https://openalex.org/A5112075882",
+                "https://openalex.org/A5110494473"
+              ]
+            }
+          ]
+        }
+
+    Returns a dict mapping each duplicate_id -> (canonical_id, canonical_name).
+    """
+    for path in [os.path.join(os.path.dirname(__file__), "aliases.json"), "aliases.json"]:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            mapping = {}
+            for entry in data.get("aliases", []):
+                cid  = entry["canonical_id"]
+                cname = entry["canonical_name"]
+                for dup in entry.get("duplicate_ids", []):
+                    mapping[dup] = (cid, cname)
+            log.info("Loaded %d alias mapping(s) from %s", len(mapping), path)
+            return mapping
+    return {}
+
+
 def _norm_name(name) -> str:
     """Normalise author name for similarity comparison.
 
@@ -355,12 +390,18 @@ def _dedup_authors(records: list[dict]) -> list[dict]:
 
 
 def papers_by_author(rows: list[dict]) -> list[dict]:
+    aliases = _load_aliases()
+
     seen: dict[tuple, dict] = {}
     for r in rows:
-        key = (r["work_id"], r["author_id"])
+        author_id = r["author_id"]
+        author_name = r["author_name"]
+        if author_id in aliases:
+            author_id, author_name = aliases[author_id]
+        key = (r["work_id"], author_id)
         if key not in seen:
             seen[key] = {
-                "author_name": r["author_name"],
+                "author_name": author_name,
                 "institution":  r["institution"],
                 "country":      r["country"],
                 "citations":    r["citations"],
