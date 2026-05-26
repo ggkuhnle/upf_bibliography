@@ -237,6 +237,6 @@ Python 3.9 or later. No API key is needed for OpenAlex.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE) if present, otherwise treat as open for reuse with attribution.
+GPL-3.0 — see [LICENSE](LICENSE).
 
 *Analysis by G. Kuhnle · Data: [OpenAlex](https://openalex.org)*
