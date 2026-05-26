@@ -203,10 +203,7 @@ def build_html(st_df: pd.DataFrame, st_year_df: pd.DataFrame) -> str:
   <div class="panel">
     {bar_div}
     <p class="note">
-      Annual paper counts by study type. Observational studies
-      (cohort, cross-sectional, case-control) dominate, reflecting the
-      epidemiological foundations of UPF research. RCTs and clinical
-      trials remain a small fraction.
+      Annual paper counts by study type (2000–2024).
     </p>
   </div>
 

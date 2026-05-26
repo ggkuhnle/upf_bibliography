@@ -937,8 +937,7 @@ EXPLANATIONS = {
         "Toggle between metrics using the buttons above the chart."
     ),
     "Degree Distribution": (
-        "Shows how many co-authors each researcher has. A long right tail and "
-        "straight log–log plot suggest a scale-free network dominated by a few hubs."
+        "Shows how many co-authors each researcher has (linear and log–log scales)."
     ),
     "Co-authorship Network": (
         "Each node is an author; edges connect co-authors. "
@@ -947,8 +946,7 @@ EXPLANATIONS = {
     ),
     "Degree vs Betweenness Centrality": (
         "<b>X</b> = degree (number of co-authors). "
-        "<b>Y</b> = betweenness (how often an author lies on shortest paths between others — "
-        "a measure of brokerage across the field). Top-right = hubs that also bridge communities."
+        "<b>Y</b> = betweenness (how often an author lies on shortest paths between others)."
     ),
     "Country Collaboration Heatmap": (
         "Co-authored papers between top country pairs. Darker = more collaboration."
@@ -978,12 +976,10 @@ EXPLANATIONS = {
         "Annual paper count with linear regression trend line."
     ),
     "Country Trends Over Time": (
-        "Annual output for the top 8 countries. "
-        "Brazil's steep rise from ~2010 reflects the NOVA classification uptake."
+        "Annual output for the top 8 countries."
     ),
     "Network Growth Over Time": (
-        "Cumulative authors (blue, left axis) and collaborations (red, right axis). "
-        "Both accelerating together means the field is growing and densifying."
+        "Cumulative authors (blue, left axis) and collaborations (red, right axis)."
     ),
     "Network Animation": (
         "Co-authorship network built cumulatively year by year. "
@@ -995,8 +991,7 @@ EXPLANATIONS = {
         "<em>Other</em> = unclassifiable with current data."
     ),
     "§12b Study Types Over Time": (
-        "Annual paper counts stacked by study design (2000–2024). "
-        "Watch whether RCTs and systematic reviews grow relative to observational work."
+        "Annual paper counts stacked by study design (2000–2024)."
     ),
     "§12c Study Type Mix by Country": (
         "100 % stacked bar: each country's papers broken down by study design. "
@@ -1008,13 +1003,12 @@ EXPLANATIONS = {
         "Shapes: ● Observational · ◆ SR/MA · ■ Review · ▲ RCT · ✚ Clinical Trial · ○ Other."
     ),
     "Author Position Analysis": (
-        "<b>Top-left</b>: stacked bar showing how each prolific author's papers split across "
-        "first (blue), last (green), and middle (orange) authorship positions. "
-        "<b>Top-right</b>: same data as 100 % proportions. "
-        "<b>Bottom-left</b>: scatter of total papers vs middle-author rate for all authors with ≥5 papers — "
-        "authors above the red dashed line (rate ≥ 0.70) with many papers are likely 'resource authors' "
-        "who appear as middle authors across many cohort-based studies. "
-        "<b>Bottom-right</b>: top-20 first-authors and top-20 last-authors (often different people)."
+        "<b>Top-left</b>: stacked bar showing each prolific author's papers by position: "
+        "first (blue), last (green), middle (orange). "
+        "<b>Top-right</b>: same data as 100% proportions. "
+        "<b>Bottom-left</b>: scatter of total papers vs middle-author rate (all authors with ≥5 papers); "
+        "dashed line at 0.70. "
+        "<b>Bottom-right</b>: top-20 first-authors and top-20 last-authors."
     ),
 }
 
@@ -1047,24 +1041,6 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
   from <a href="https://openalex.org" target="_blank">OpenAlex</a> using the NOVA classification
   search terms. The analysis covers <b>{len(_auth):,} unique authors</b> across
   <b>{len(_inst):,} institutions</b> in <b>{len(_ctr)} countries</b>.</p>
-
-  <h2>Key findings</h2>
-  <ul>
-    <li><b>{_top_c["country"]} leads</b> with {int(_top_c["papers"]):,} papers
-    ({_top_c_pct}% of total).</li>
-    <li><b>{_top_i["institution"]}</b> is the most productive institution
-    ({_top_i_pct}% of all papers, {int(_top_i["citations"]):,} citations).
-    The top 5 institutions account for {_top5_pct}% of the literature.</li>
-    <li><b>{_top_a["author_name"]}</b> is the most prolific author
-    ({int(_top_a["papers"])} papers, {int(_top_a["citations"]):,} citations),
-    followed by <b>{_top_a2["author_name"]}</b>
-    ({int(_top_a2["papers"])} papers, {int(_top_a2["citations"]):,} citations).</li>
-    <li>The co-authorship network contains <b>{_n_nodes:,} authors</b> and
-    <b>{_n_edges:,} links</b> in <b>{_n_comm} communities</b>.
-    The most central broker is <b>{_top_betw["name"]}</b>
-    ({_top_betw["institution"]}).</li>
-    {"<li>" + _funder_note + "</li>" if _funder_note else ""}
-  </ul>
 
   <h2>Caveats</h2>
   <ul>
