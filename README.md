@@ -12,8 +12,9 @@ Open bibliometric analysis of the global ultra-processed food (UPF) research lit
 |--------|-------------|
 | [Research Overview](output/upf_dashboard.html) | Publications by country, institution, author; temporal trends; network metrics |
 | [Co-authorship Network](output/network_interactive.html) | Interactive year-by-year network explorer with author search |
-| [Influence Analysis](output/influence_dashboard.html) | Most-cited works and authors; inside-vs-outside citation scatter |
 | [World Map](output/world_map.html) | Institution-level bubble map; [PNG version](output/world_map.png) |
+| [Study Types](output/study_type.html) | RCT / Observational / Review breakdown; temporal trends |
+| [Study Type Network](output/network_study_type.html) | Co-authorship network with node shapes by dominant study type |
 
 ## Quick start
 
@@ -26,12 +27,12 @@ pip install -r requirements.txt
 # 1. Fetch all papers and write CSVs (~12 min for ~7 000 papers)
 python upf_bibliometrics.py
 
-# 2. Build the dashboards
-python make_interactive_network.py
-python make_influence_dashboard.py
-python make_world_map.py
-python make_study_type_dashboard.py
-python make_study_type_network.py
+# 2. Build all dashboards
+python make_dashboard.py              # main overview dashboard
+python make_interactive_network.py    # co-authorship network
+python make_world_map.py              # world map (HTML + PNG)
+python make_study_type_dashboard.py   # study type donut + bar charts
+python make_study_type_network.py     # study-type-shaped network
 
 # 3. Open index.html in a browser
 open output/index.html
@@ -40,6 +41,16 @@ open output/index.html
 Use `--dry-run` on any script to fetch only the first 2 pages for testing.
 
 ## Scripts
+
+### `make_dashboard.py`
+Standalone script that rebuilds `output/upf_dashboard.html` and `output/author_centrality.csv` from the CSVs produced by `upf_bibliometrics.py`. Covers all charts from the notebook: institution/author rankings, temporal trends, network centrality, community detection, animated co-authorship network, and study type analysis (§12). No Jupyter required.
+
+```bash
+python make_dashboard.py                   # default output dir: output/
+python make_dashboard.py --output-dir out  # custom dir
+```
+
+**Output:** `output/upf_dashboard.html`, `output/author_centrality.csv`
 
 ### `upf_bibliometrics.py`
 Queries OpenAlex for works matching `ultra-processed`, `ultraprocessed`, or `NOVA classification` in title/abstract. Handles cursor pagination and retries. Writes CSV tables to `output/` and prints a summary report.
@@ -90,12 +101,13 @@ Co-authorship network where each author node is coloured and shaped by their dom
 
 ```
 upf_bibliography/
-├── index.html                    # landing page
 ├── upf_bibliometrics.py          # data retrieval
-├── influence_analysis.py         # reference network + Altmetric
-├── make_interactive_network.py   # network explorer
-├── make_influence_dashboard.py   # influence dashboard
-├── make_world_map.py             # world map
+├── make_dashboard.py             # main overview dashboard
+├── make_interactive_network.py   # co-authorship network explorer
+├── make_world_map.py             # world map (HTML + PNG)
+├── make_study_type_dashboard.py  # study type donut + bar charts
+├── make_study_type_network.py    # study-type-shaped network
+├── influence_analysis.py         # reference network + Altmetric (optional)
 ├── requirements.txt
 ├── notebooks/
 │   └── author_network.ipynb      # exploratory network notebook
