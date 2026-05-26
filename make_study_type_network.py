@@ -19,8 +19,8 @@ import pandas as pd
 
 OUTPUT_DIR  = "output"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "network_study_type.html")
-MIN_PAPERS  = 3
-PLOT_CAP    = 400
+MIN_PAPERS  = 1
+PLOT_CAP    = 600
 LAYOUT_SEED = 42
 START_YEAR  = 2005
 
@@ -187,23 +187,31 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 #hdr p{{font-size:0.75rem;opacity:0.65;margin-top:1px}}
 #hdr .spacer{{flex:1}}
 #hdr .badge{{background:rgba(255,255,255,0.12);border-radius:20px;padding:3px 10px;font-size:0.72rem}}
-#ctrl{{background:#fff;border-bottom:1px solid #d8dde5;padding:10px 20px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;flex-shrink:0}}
+#ctrl{{background:#fff;border-bottom:1px solid #d8dde5;padding:8px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;flex-shrink:0}}
+#ctrl2{{background:#fafbfc;border-bottom:1px solid #d8dde5;padding:7px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0}}
 .cg{{display:flex;flex-direction:column;gap:3px}}
 .cg label{{font-size:0.7rem;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.04em}}
 .cg-row{{display:flex;align-items:center;gap:8px}}
 #yr-val{{font-size:1.15rem;font-weight:800;color:#1a2742;min-width:3rem}}
-#yr-sl,#minpap-sl{{width:200px;accent-color:#1a2742;cursor:pointer}}
+#yr-sl,#minpap-sl{{width:160px;accent-color:#1a2742;cursor:pointer}}
 #minpap-val{{font-size:1.05rem;font-weight:700;color:#1a2742;min-width:1.8rem}}
-#auth-in{{padding:6px 10px;border:1px solid #c8ced5;border-radius:5px;font-size:0.88rem;width:210px;outline:none}}
+#auth-in{{padding:6px 10px;border:1px solid #c8ced5;border-radius:5px;font-size:0.88rem;width:200px;outline:none}}
 #auth-in:focus{{border-color:#1a2742;box-shadow:0 0 0 2px rgba(26,39,66,.12)}}
 #srch-wrap{{position:relative}}
 #auth-dd{{position:absolute;top:100%;left:0;z-index:200;background:#fff;border:1px solid #c8ced5;border-top:none;border-radius:0 0 5px 5px;max-height:200px;overflow-y:auto;width:280px;box-shadow:0 6px 16px rgba(0,0,0,.12);display:none}}
 .dd-item{{padding:6px 10px;cursor:pointer;font-size:0.83rem;border-bottom:1px solid #f2f2f2}}
 .dd-item:hover{{background:#f0f4ff}}
 .dd-sub{{font-size:0.72rem;color:#999;margin-top:1px}}
-#clear-btn{{padding:5px 13px;background:#6c757d;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.82rem;white-space:nowrap}}
-#clear-btn:hover{{background:#555}}
+.act-btn{{padding:5px 13px;border:none;border-radius:4px;cursor:pointer;font-size:0.82rem;white-space:nowrap;transition:background .15s}}
+#clear-btn{{background:#6c757d;color:#fff}}.anim-btn{{background:#1a2742;color:#fff}}
+#clear-btn:hover{{background:#555}}.anim-btn:hover{{background:#2c4a8a}}
 #stats{{font-size:0.78rem;color:#888;margin-left:auto}}
+/* study type pills */
+.st-pill-wrap{{display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.st-pill{{padding:3px 11px;border-radius:12px;cursor:pointer;font-size:0.75rem;font-weight:600;border:2px solid var(--c,#888);color:var(--c,#888);background:#fff;transition:background .13s,color .13s;white-space:nowrap;user-select:none}}
+.st-pill.active{{background:var(--c,#888);color:#fff}}
+.st-pill:hover:not(.active){{background:rgba(0,0,0,0.04)}}
+.pill-label{{font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}}
 #main{{display:flex;flex:1;overflow:hidden}}
 #net{{flex:1;min-width:0}}
 #panel{{width:270px;background:#fff;border-left:1px solid #d8dde5;display:none;flex-direction:column;overflow-y:auto;flex-shrink:0}}
@@ -233,13 +241,16 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
   <div class="spacer"></div>
   <span class="badge" id="hdr-stats"></span>
 </div>
+
 <div id="ctrl">
   <div class="cg">
     <label>Show papers up to year</label>
     <div class="cg-row">
       <span id="yr-val">{max_year}</span>
       <input type="range" id="yr-sl" min="{min_year_data}" max="{max_year}" value="{max_year}" step="1">
-      <span style="font-size:.72rem;color:#aaa">{min_year_data} – {max_year}</span>
+      <span style="font-size:.72rem;color:#aaa">{min_year_data}–{max_year}</span>
+      <button class="act-btn anim-btn" id="play-btn">&#9654; Play</button>
+      <button class="act-btn anim-btn" id="reset-btn">&#8634; Reset</button>
     </div>
   </div>
   <div class="cg">
@@ -250,15 +261,21 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
     </div>
   </div>
   <div class="cg">
-    <label>Min. papers per author</label>
+    <label>Min. papers</label>
     <div class="cg-row">
-      <span id="minpap-val">3</span>
-      <input type="range" id="minpap-sl" min="3" max="30" value="3" step="1">
+      <span id="minpap-val">1</span>
+      <input type="range" id="minpap-sl" min="1" max="30" value="1" step="1">
     </div>
   </div>
-  <button id="clear-btn">Clear highlight</button>
+  <button class="act-btn" id="clear-btn">Clear all</button>
   <div id="stats">hover or click a node to explore</div>
 </div>
+
+<div id="ctrl2">
+  <span class="pill-label">Highlight type:</span>
+  <div class="st-pill-wrap" id="st-pills"></div>
+</div>
+
 <div id="main">
   <div id="net"></div>
   <div id="panel">
@@ -276,30 +293,30 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 </div>
 <script>
 // ── Embedded data ─────────────────────────────────────────────────────────────
-const NODES   = {nodes_str};   // {{i,name,inst,ctr,pap,cit,deg,st,x,y}}
-const EDGES   = {edges_str};   // [a,b,first_year,shared_papers]
-const STYLES  = {styles_str};  // [{{name,color,symbol}}, ...]
+const NODES   = {nodes_str};
+const EDGES   = {edges_str};
+const STYLES  = {styles_str};
 const MAX_YR  = {max_year};
 const MIN_YR  = {min_year_data};
 
 // ── Pre-compute adjacency ─────────────────────────────────────────────────────
 const adj = NODES.map(() => ({{}}));
-EDGES.forEach(([a,b,yr,pap]) => {{
-  adj[a][b] = pap;
-  adj[b][a] = pap;
-}});
+EDGES.forEach(([a,b,,pap]) => {{ adj[a][b] = pap; adj[b][a] = pap; }});
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let curYear = MAX_YR;
-let hlNode  = null;
-let minPap  = 3;
+let curYear     = MAX_YR;
+let hlNode      = null;
+let hlType      = null;
+let minPap      = 1;
+let animTimer   = null;
+let animRunning = false;
 
 // ── Build Plotly traces ───────────────────────────────────────────────────────
-function buildTraces(year, hl, minPap=3) {{
+function buildTraces(year, hl, mp, ht) {{
   const activeNodes = new Set();
   const activeEdges = [];
   EDGES.forEach(([a,b,yr,pap]) => {{
-    if (yr <= year && NODES[a].pap >= minPap && NODES[b].pap >= minPap) {{
+    if (yr <= year && NODES[a].pap >= mp && NODES[b].pap >= mp) {{
       activeNodes.add(a); activeNodes.add(b);
       activeEdges.push([a,b,pap]);
     }}
@@ -313,7 +330,6 @@ function buildTraces(year, hl, minPap=3) {{
     }});
   }}
 
-  // Edge trace
   const ex=[], ey=[];
   activeEdges.forEach(([a,b]) => {{
     if (hl !== null && a !== hl && b !== hl) return;
@@ -327,16 +343,19 @@ function buildTraces(year, hl, minPap=3) {{
     hoverinfo:'none', showlegend:false,
   }};
 
-  // One node trace per study type (enables legend + shape)
   const nodeTraces = STYLES.map((st, si) => {{
     const nx_=[], ny_=[], ns=[], no_=[], nt=[], nci=[];
     NODES.forEach((n,i) => {{
       if (!activeNodes.has(i) || n.st !== si) return;
-      let op = 1;
-      if (hl !== null) {{
+      let op;
+      if (ht !== null && si !== ht) {{
+        op = 0.06;
+      }} else if (hl !== null) {{
         if      (i === hl)             op = 1.0;
         else if (hlNeighbours.has(i))  op = 0.85;
         else                           op = 0.07;
+      }} else {{
+        op = 1.0;
       }}
       nx_.push(n.x); ny_.push(n.y);
       ns.push(Math.max(6, Math.min(22, 5 + n.deg * 0.22)));
@@ -345,20 +364,11 @@ function buildTraces(year, hl, minPap=3) {{
       nci.push(i);
     }});
     return {{
-      type:'scatter', mode:'markers',
-      name: st.name,
+      type:'scatter', mode:'markers', name: st.name,
       x: nx_, y: ny_,
-      marker:{{
-        symbol: st.symbol,
-        size: ns,
-        color: st.color,
-        opacity: no_,
-        line:{{width:0.8, color:'white'}},
-      }},
-      hovertemplate: nt,
-      customdata: nci,
-      showlegend: true,
-      legendgroup: st.name,
+      marker:{{ symbol:st.symbol, size:ns, color:st.color, opacity:no_, line:{{width:0.8,color:'white'}} }},
+      hovertemplate:nt, customdata:nci,
+      showlegend:true, legendgroup:st.name,
     }};
   }});
 
@@ -366,39 +376,31 @@ function buildTraces(year, hl, minPap=3) {{
 }}
 
 const layout = {{
-  margin:{{l:8, r:8, t:8, b:8}},
-  xaxis:{{showgrid:false, zeroline:false, showticklabels:false, fixedrange:false}},
-  yaxis:{{showgrid:false, zeroline:false, showticklabels:false, scaleanchor:'x'}},
+  margin:{{l:8,r:8,t:8,b:8}},
+  xaxis:{{showgrid:false,zeroline:false,showticklabels:false,fixedrange:false}},
+  yaxis:{{showgrid:false,zeroline:false,showticklabels:false,scaleanchor:'x'}},
   hovermode:'closest',
-  paper_bgcolor:'#f9fafc',
-  plot_bgcolor:'#f9fafc',
-  showlegend: true,
-  legend:{{
-    x:0, y:1, xanchor:'left', yanchor:'top',
-    bgcolor:'rgba(255,255,255,0.85)',
-    bordercolor:'#ddd', borderwidth:1,
-    font:{{size:11}},
-  }},
+  paper_bgcolor:'#f9fafc', plot_bgcolor:'#f9fafc',
+  showlegend:true,
+  legend:{{x:0,y:1,xanchor:'left',yanchor:'top',bgcolor:'rgba(255,255,255,0.85)',bordercolor:'#ddd',borderwidth:1,font:{{size:11}}}},
 }};
 const config = {{
   displayModeBar:true, responsive:true,
   modeBarButtonsToRemove:['select2d','lasso2d','toggleSpikelines','autoScale2d'],
 }};
 
-function updateStats(year, minPap=3) {{
-  const nodes = new Set(), edges = [];
+function updateStats(year, mp) {{
+  const nodes = new Set(); let ec = 0;
   EDGES.forEach(([a,b,yr]) => {{
-    if (yr <= year && NODES[a].pap >= minPap && NODES[b].pap >= minPap)
-      {{ nodes.add(a); nodes.add(b); edges.push(1); }}
+    if (yr <= year && NODES[a].pap >= mp && NODES[b].pap >= mp)
+      {{ nodes.add(a); nodes.add(b); ec++; }}
   }});
-  document.getElementById('stats').textContent =
-    `${{nodes.size}} authors · ${{edges.length}} collaborations`;
-  document.getElementById('hdr-stats').textContent =
-    `${{nodes.size}} authors · ${{edges.length}} co-authorship links`;
+  document.getElementById('stats').textContent = `${{nodes.size}} authors · ${{ec}} collaborations`;
+  document.getElementById('hdr-stats').textContent = `${{nodes.size}} authors · ${{ec}} co-authorship links`;
 }}
 
 // ── Initial render ────────────────────────────────────────────────────────────
-Plotly.newPlot('net', buildTraces(curYear, null, minPap), layout, config);
+Plotly.newPlot('net', buildTraces(curYear, null, minPap, null), layout, config);
 updateStats(curYear, minPap);
 
 // ── Year slider ───────────────────────────────────────────────────────────────
@@ -410,107 +412,146 @@ slEl.addEventListener('input', () => {{
   clearTimeout(slTimer);
   slTimer = setTimeout(() => {{
     curYear = +slEl.value;
-    Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
     updateStats(curYear, minPap);
     if (hlNode !== null) refreshPanel(hlNode);
   }}, 60);
 }});
 
+// ── Animation ────────────────────────────────────────────────────────────────
+const playBtn  = document.getElementById('play-btn');
+const resetBtn = document.getElementById('reset-btn');
+
+function stopAnim() {{
+  clearInterval(animTimer); animTimer = null; animRunning = false;
+  playBtn.innerHTML = '&#9654; Play';
+}}
+
+function startAnim() {{
+  if (+slEl.value >= MAX_YR) {{
+    slEl.value = MIN_YR; curYear = MIN_YR; yrEl.textContent = MIN_YR;
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
+    updateStats(curYear, minPap);
+  }}
+  animRunning = true; playBtn.innerHTML = '&#9646;&#9646; Pause';
+  animTimer = setInterval(() => {{
+    const next = +slEl.value + 1;
+    if (next > MAX_YR) {{ stopAnim(); return; }}
+    slEl.value = next; yrEl.textContent = next; curYear = next;
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
+    updateStats(curYear, minPap);
+    if (hlNode !== null) refreshPanel(hlNode);
+  }}, 700);
+}}
+
+playBtn.addEventListener('click', () => {{ if (animRunning) stopAnim(); else startAnim(); }});
+resetBtn.addEventListener('click', () => {{
+  stopAnim();
+  slEl.value = MIN_YR; curYear = MIN_YR; yrEl.textContent = MIN_YR;
+  Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
+  updateStats(curYear, minPap);
+}});
+
+// ── Study type pills ──────────────────────────────────────────────────────────
+const pillsWrap = document.getElementById('st-pills');
+pillsWrap.innerHTML =
+  `<span class="st-pill active" data-st="-1" style="--c:#555">All</span>` +
+  STYLES.map((s,i) => `<span class="st-pill" data-st="${{i}}" style="--c:${{s.color}}">${{s.name}}</span>`).join('');
+
+function setPillActive(stIdx) {{
+  document.querySelectorAll('.st-pill').forEach(p => p.classList.remove('active'));
+  const sel = stIdx === null
+    ? document.querySelector('[data-st="-1"]')
+    : document.querySelector(`[data-st="${{stIdx}}"]`);
+  if (sel) sel.classList.add('active');
+}}
+
+pillsWrap.addEventListener('click', e => {{
+  const pill = e.target.closest('.st-pill');
+  if (!pill) return;
+  const st = +pill.dataset.st;
+  hlType = (st === -1 || hlType === st) ? null : st;
+  setPillActive(hlType);
+  Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
+}});
+
+// Legend click highlights the type instead of toggling visibility
+document.getElementById('net').on('plotly_legendclick', data => {{
+  const stIdx = data.curveNumber - 1;
+  if (stIdx < 0 || stIdx >= STYLES.length) return false;
+  hlType = (hlType === stIdx) ? null : stIdx;
+  setPillActive(hlType);
+  Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
+  return false;
+}});
+
 // ── Author search ─────────────────────────────────────────────────────────────
 const authIn = document.getElementById('auth-in');
 const authDd = document.getElementById('auth-dd');
-const nameList = NODES.map((n,i) => ({{i, name:n.name, inst:n.inst}}))
-                      .sort((a,b) => a.name.localeCompare(b.name));
+const nameList = NODES.map((n,i) => ({{i,name:n.name,inst:n.inst}})).sort((a,b) => a.name.localeCompare(b.name));
 
 function showDd(q) {{
   const ql = q.toLowerCase();
   const hits = nameList.filter(x => x.name.toLowerCase().includes(ql)).slice(0,18);
   if (!hits.length) {{ authDd.style.display='none'; return; }}
   authDd.innerHTML = hits.map(h =>
-    `<div class="dd-item" data-i="${{h.i}}">
-       <div>${{h.name}}</div>
-       <div class="dd-sub">${{h.inst||''}}</div>
-     </div>`
+    `<div class="dd-item" data-i="${{h.i}}"><div>${{h.name}}</div><div class="dd-sub">${{h.inst||''}}</div></div>`
   ).join('');
   authDd.querySelectorAll('.dd-item').forEach(el =>
-    el.addEventListener('mousedown', e => {{
-      e.preventDefault();
-      pickAuthor(+el.dataset.i);
-      authDd.style.display='none';
-    }})
+    el.addEventListener('mousedown', e => {{ e.preventDefault(); pickAuthor(+el.dataset.i); authDd.style.display='none'; }})
   );
   authDd.style.display='block';
 }}
-authIn.addEventListener('input', () => {{
-  const q = authIn.value.trim();
-  q.length >= 2 ? showDd(q) : (authDd.style.display='none');
-}});
+authIn.addEventListener('input', () => {{ const q=authIn.value.trim(); q.length>=2 ? showDd(q) : (authDd.style.display='none'); }});
 authIn.addEventListener('blur',  () => setTimeout(() => authDd.style.display='none', 160));
-authIn.addEventListener('focus', () => authIn.value.trim().length >= 2 && showDd(authIn.value.trim()));
+authIn.addEventListener('focus', () => authIn.value.trim().length>=2 && showDd(authIn.value.trim()));
 
-// ── Node click ────────────────────────────────────────────────────────────────
+// ── Node click & panel ────────────────────────────────────────────────────────
 document.getElementById('net').on('plotly_click', data => {{
   const pt = data.points[0];
   if (pt.customdata !== undefined && pt.customdata !== null) pickAuthor(+pt.customdata);
 }});
 
 function pickAuthor(idx) {{
-  hlNode = idx;
-  authIn.value = NODES[idx].name;
-  Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
+  hlNode = idx; authIn.value = NODES[idx].name;
+  Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
   refreshPanel(idx);
 }}
 
-// ── Info panel ────────────────────────────────────────────────────────────────
 function refreshPanel(idx) {{
   const n = NODES[idx];
   const stName = STYLES[n.st] ? STYLES[n.st].name : 'Unknown';
   document.getElementById('panel-name').textContent = n.name;
-
   const rows = [
-    ['Institution',          n.inst || '—'],
-    ['Country',              n.ctr  || '—'],
+    ['Institution',          n.inst||'—'],
+    ['Country',              n.ctr||'—'],
     ['Dominant study type',  stName],
     ['Papers (UPF)',         n.pap],
     ['Citations',            n.cit.toLocaleString()],
     ['Co-authors (network)', Object.keys(adj[idx]).length],
   ];
   document.getElementById('panel-rows').innerHTML = rows.map(([k,v]) =>
-    `<div class="pr"><span class="pk">${{k}}</span><span class="pv">${{v}}</span></div>`
-  ).join('');
+    `<div class="pr"><span class="pk">${{k}}</span><span class="pv">${{v}}</span></div>`).join('');
 
   const coauths = Object.entries(adj[idx])
-    .filter(([j]) => {{
-      const jn = +j;
-      return EDGES.some(([a,b,yr]) => yr <= curYear && ((a===idx&&b===jn)||(b===idx&&a===jn)));
-    }})
-    .map(([j,pap]) => [+j, pap])
-    .sort((a,b) => b[1]-a[1])
-    .slice(0,12);
+    .filter(([j]) => {{ const jn=+j; return EDGES.some(([a,b,yr]) => yr<=curYear&&((a===idx&&b===jn)||(b===idx&&a===jn))); }})
+    .map(([j,pap]) => [+j,pap]).sort((a,b) => b[1]-a[1]).slice(0,12);
 
   const list = document.getElementById('coauth-list');
   list.innerHTML = coauths.length
     ? coauths.map(([j,pap]) =>
-        `<li data-j="${{j}}">
-           <span class="name">${{NODES[j].name}}</span>
-           <span class="cnt">${{pap}} paper${{pap>1?'s':''}}</span>
-         </li>`).join('')
+        `<li data-j="${{j}}"><span class="name">${{NODES[j].name}}</span><span class="cnt">${{pap}} paper${{pap>1?'s':''}}</span></li>`).join('')
     : '<li style="color:#aaa;cursor:default">None visible at this year</li>';
-
-  list.querySelectorAll('li[data-j]').forEach(el =>
-    el.addEventListener('click', () => pickAuthor(+el.dataset.j))
-  );
-
+  list.querySelectorAll('li[data-j]').forEach(el => el.addEventListener('click', () => pickAuthor(+el.dataset.j)));
   document.getElementById('panel').style.display = 'flex';
 }}
 
-document.getElementById('close-btn').addEventListener('click', () => {{
-  document.getElementById('panel').style.display = 'none';
-}});
+document.getElementById('close-btn').addEventListener('click', () => {{ document.getElementById('panel').style.display='none'; }});
 
 document.getElementById('clear-btn').addEventListener('click', () => {{
-  hlNode = null; authIn.value = '';
-  Plotly.react('net', buildTraces(curYear, null, minPap), layout);
+  hlNode = null; hlType = null; authIn.value = '';
+  setPillActive(null);
+  Plotly.react('net', buildTraces(curYear, null, minPap, null), layout);
   document.getElementById('panel').style.display = 'none';
   document.getElementById('stats').textContent = 'hover or click a node to explore';
 }});
@@ -528,7 +569,7 @@ minPapSl.addEventListener('input', () => {{
       hlNode = null; authIn.value = '';
       document.getElementById('panel').style.display = 'none';
     }}
-    Plotly.react('net', buildTraces(curYear, hlNode, minPap), layout);
+    Plotly.react('net', buildTraces(curYear, hlNode, minPap, hlType), layout);
     updateStats(curYear, minPap);
   }}, 60);
 }});
