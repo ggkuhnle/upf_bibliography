@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 
 """
-upf_bibliometrics.py
-Retrieve ultra-processed food literature from OpenAlex and produce ranked
-CSV tables + a printed summary report.
+bibliometrics.py  (formerly upf_bibliometrics.py)
+Retrieve literature from OpenAlex and produce ranked CSV tables.
+Keywords and topic title are read from config.json in the same directory.
 
 Usage
 -----
-    python upf_bibliometrics.py                       # defaults
-    python upf_bibliometrics.py --output-dir results  # custom output dir
-    python upf_bibliometrics.py --terms "ultra-processed" "NOVA"
-    python upf_bibliometrics.py --dry-run             # first 2 pages only
+    python bibliometrics.py                       # uses config.json keywords
+    python bibliometrics.py --output-dir results  # custom output dir
+    python bibliometrics.py --terms "flavanol" "flavan-3-ol"
+    python bibliometrics.py --dry-run             # first 2 pages only
 """
 
 import argparse
 import collections
 import csv
+import json
 import logging
 import os
 import re
@@ -28,7 +29,16 @@ import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-DEFAULT_TERMS = [
+def _load_config() -> dict:
+    for path in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+    return {}
+
+_CFG = _load_config()
+
+DEFAULT_TERMS = _CFG.get("keywords", [
     "ultra-processed food",
     "ultra-processed foods",
     "ultraprocessed food",
@@ -36,7 +46,7 @@ DEFAULT_TERMS = [
     "ultra-processed diet",
     "ultraprocessed diet",
     "NOVA food classification",
-]
+])
 DEFAULT_OUTPUT_DIR = "output"
 MAILTO = "g.kuhnle@reading.ac.uk"
 BASE_URL = "https://api.openalex.org/works"
@@ -298,13 +308,19 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
         "papers": 0, "citations": 0,
         "first_author_papers": 0, "last_author_papers": 0, "middle_author_papers": 0,
     })
+    # Collect all institution/country values per author to pick the most frequent.
+    inst_votes:    dict[str, list] = collections.defaultdict(list)
+    country_votes: dict[str, list] = collections.defaultdict(list)
+
     for (_, author_id), meta in seen.items():
         key = author_id or meta["author_name"]
         counter[key]["author_name"] = meta["author_name"]
-        counter[key]["institution"] = counter[key]["institution"] or meta["institution"]
-        counter[key]["country"]     = counter[key]["country"]     or meta["country"]
         counter[key]["papers"]    += 1
         counter[key]["citations"] += meta["citations"]
+        if meta["institution"]:
+            inst_votes[key].append(meta["institution"])
+        if meta["country"]:
+            country_votes[key].append(meta["country"])
         pos = meta.get("position", "middle")
         if pos == "first":
             counter[key]["first_author_papers"]  += 1
@@ -312,6 +328,12 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
             counter[key]["last_author_papers"]   += 1
         else:
             counter[key]["middle_author_papers"] += 1
+
+    for key in counter:
+        if inst_votes[key]:
+            counter[key]["institution"] = collections.Counter(inst_votes[key]).most_common(1)[0][0]
+        if country_votes[key]:
+            counter[key]["country"] = collections.Counter(country_votes[key]).most_common(1)[0][0]
 
     result = []
     for aid, v in counter.items():
@@ -527,13 +549,18 @@ def papers_by_author_study_type(works: list[dict], rows: list[dict]) -> list[dic
     counter: dict[tuple, dict] = collections.defaultdict(
         lambda: {"author_name": "", "author_id": "", "institution": "", "papers": 0, "citations": 0}
     )
+    inst_votes: dict[tuple, list] = collections.defaultdict(list)
     for (_, author_key), meta in seen.items():
         key = (author_key, meta["study_type"])
         counter[key]["author_name"] = counter[key]["author_name"] or meta["author_name"]
         counter[key]["author_id"]   = counter[key]["author_id"]   or meta["author_id"]
-        counter[key]["institution"] = counter[key]["institution"]  or meta["institution"]
         counter[key]["papers"]    += 1
         counter[key]["citations"] += meta["citations"]
+        if meta["institution"]:
+            inst_votes[key].append(meta["institution"])
+    for key in counter:
+        if inst_votes[key]:
+            counter[key]["institution"] = collections.Counter(inst_votes[key]).most_common(1)[0][0]
 
     return sorted(
         [{"author_id": k[0], "study_type": k[1], **v} for k, v in counter.items()],
@@ -569,83 +596,6 @@ def papers_by_study_type_year(works: list[dict]) -> list[dict]:
     return sorted(
         [{"year": k[0], "study_type": k[1], **v} for k, v in counter.items()],
         key=lambda x: (x["year"], x["study_type"]),
-    )
-
-
-# ── Cohort detection ──────────────────────────────────────────────────────────
-
-# Patterns matched against paper titles (case-insensitive).
-# Title-only detection has ~50-60% recall for major cohorts; good enough for
-# a bibliometric signal but not for a definitive cohort membership list.
-COHORTS: dict[str, re.Pattern] = {  # type: ignore[type-arg]
-    "EPIC":              re.compile(r'\bEPIC\b|European Prospective Investigation', re.I),
-    "NutriNet-Santé":    re.compile(r'NutriNet', re.I),
-    "NHS / NHS2":        re.compile(r"Nurses.{0,6}Health Study", re.I),
-    "HPFS":              re.compile(r"Health Professionals Follow.?up", re.I),
-    "UK Biobank":        re.compile(r"UK Biobank", re.I),
-    "PREDIMED":          re.compile(r'\bPREDIMED\b', re.I),
-    "SUN":               re.compile(r'\bSUN\b.{0,20}(cohort|study)|Seguimiento Universidad de Navarra', re.I),
-    "ELSA-Brasil":       re.compile(r'ELSA.Brasil', re.I),
-    "NHANES":            re.compile(r'\bNHANES\b', re.I),
-    "WHI":               re.compile(r"Women.s Health Initiative", re.I),
-    "MESA":              re.compile(r'\bMESA\b.{0,25}(study|cohort|data)|Multi.Ethnic Study of Atherosclerosis', re.I),
-    "Rotterdam Study":   re.compile(r'Rotterdam Study', re.I),
-    "PURE":              re.compile(r'\bPURE\b.{0,25}(study|cohort)|Prospective Urban Rural Epidemiology', re.I),
-    "HUNT":              re.compile(r'\bHUNT\b.{0,25}(study|cohort|survey)', re.I),
-    "Malmö D&C":         re.compile(r'Malmö Diet and Cancer', re.I),
-    "NIH-AARP":          re.compile(r'NIH.AARP', re.I),
-    "ALSPAC":            re.compile(r'\bALSPAC\b|Avon Longitudinal Study', re.I),
-    "CARDIA":            re.compile(r'\bCARDIA\b.{0,25}(study|cohort)', re.I),
-    "ARIC":              re.compile(r'\bARIC\b.{0,25}(study|cohort)', re.I),
-    "REGARDS":           re.compile(r'\bREGARDS\b', re.I),
-    "SHARE":             re.compile(r'\bSHARE\b.{0,25}(study|survey|cohort)', re.I),
-    "ATTICA":            re.compile(r'\bATTICA\b.{0,25}(study|cohort)', re.I),
-    "ENRICA":            re.compile(r'\bENRICA\b', re.I),
-    "Generation XXI":    re.compile(r'Generation XXI|Gen XXI', re.I),
-    "ELSA (UK)":         re.compile(r'\bELSA\b.{0,30}(ageing|aging|longitudinal)', re.I),
-    "ASPREE":            re.compile(r'\bASPREE\b', re.I),
-    "CPS-II":            re.compile(r'\bCPS.?II\b|Cancer Prevention Study II', re.I),
-    "NutriNet-Brasil":   re.compile(r'NutriNet.Brasil', re.I),
-    "KNHANES":           re.compile(r'\bKNHANES\b|Korea National Health and Nutrition', re.I),
-    "CHNS":              re.compile(r'\bCHNS\b|China Health and Nutrition Survey', re.I),
-    "45 and Up":         re.compile(r'45 and Up Study', re.I),
-    "Melbourne Cohort":  re.compile(r'Melbourne Collaborative Cohort', re.I),
-    "InfAnti":           re.compile(r'\bInfAnti\b', re.I),
-    "PLCO":              re.compile(r'\bPLCO\b|Prostate.Lung.Colorectal', re.I),
-    "REGARDS":           re.compile(r'\bREGARDS\b', re.I),
-}
-
-
-def detect_cohorts(work: dict) -> list[str]:
-    """Return list of cohort names found in the paper title."""
-    title = (work.get("title") or "").strip()
-    return [name for name, pat in COHORTS.items() if pat.search(title)]
-
-
-def papers_by_cohort(works: list[dict]) -> list[dict]:
-    counter: dict[str, dict] = collections.defaultdict(
-        lambda: {"papers": 0, "citations": 0,
-                 "rct": 0, "observational": 0, "review": 0, "other": 0}
-    )
-    for work in works:
-        cohorts = detect_cohorts(work)
-        if not cohorts:
-            continue
-        cites = work.get("cited_by_count", 0)
-        st    = classify_study_type(work)
-        st_key = {
-            "RCT": "rct",
-            "Observational": "observational",
-            "Review": "review",
-            "Systematic Review / Meta-analysis": "review",
-        }.get(st, "other")
-        for cohort in cohorts:
-            counter[cohort]["papers"]    += 1
-            counter[cohort]["citations"] += cites
-            counter[cohort][st_key]      += 1
-    return sorted(
-        [{"cohort": k, **v} for k, v in counter.items()],
-        key=lambda x: x["papers"], reverse=True,
     )
 
 
@@ -1187,14 +1137,6 @@ def main() -> None:
         os.path.join(out, "coauthorship_edges_by_year_primary.csv"),
         ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
         primary_edges_yr,
-    )
-
-    # Cohort detection
-    cohort_tbl = papers_by_cohort(works)
-    write_csv(
-        os.path.join(out, "papers_by_cohort.csv"),
-        ["cohort", "papers", "citations", "rct", "observational", "review", "other"],
-        cohort_tbl,
     )
 
     # Journal analyses

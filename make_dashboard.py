@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 make_dashboard.py
-Rebuild output/upf_dashboard.html and output/author_centrality.csv from the
-CSV files written by upf_bibliometrics.py.  Equivalent to running every cell
-in notebooks/author_network.ipynb, without needing Jupyter.
+Build output/dashboard.html from CSVs in the output directory.
+Topic title and search keywords are read from config.json.
 
 Usage:
-    python make_dashboard.py
-    python make_dashboard.py --output-dir results  # custom output dir
+    python make_dashboard.py               # rebuild charts from existing CSVs
+    python make_dashboard.py --fetch       # fetch/update data first, then rebuild
+    python make_dashboard.py --output-dir results
 """
 
 import argparse
@@ -15,6 +15,8 @@ import collections
 import json
 import math
 import os
+import subprocess
+import sys
 import warnings
 
 import numpy as np
@@ -28,9 +30,21 @@ warnings.filterwarnings("ignore")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+def _load_config() -> dict:
+    for path in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+    return {}
+
+_CFG = _load_config()
+TOPIC_TITLE = _CFG.get("title", "Research Bibliometrics")
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--output-dir", default="output")
+    p.add_argument("--fetch", action="store_true",
+                   help="Run bibliometrics.py first to update CSVs, then rebuild charts.")
     return p.parse_args()
 
 MIN_PAPERS      = 3
@@ -474,7 +488,7 @@ def fig_network_community(G_lcc, G_plot, pos):
 
     fig = go.Figure(data=[edge_trace] + node_traces)
     fig.update_layout(
-        title=f"UPF Co-authorship Network  |  {G_plot.number_of_nodes()} authors, "
+        title=f"{TOPIC_TITLE} — Co-authorship Network  |  {G_plot.number_of_nodes()} authors, "
               f"{G_plot.number_of_edges()} edges  |  colour = community",
         showlegend=True, hovermode="closest", height=750,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -635,7 +649,7 @@ def fig_temporal(year_df, country_year_df, net_metrics_df):
         marker_color="steelblue", opacity=0.85))
     fig_a.add_trace(go.Scatter(x=x, y=trend, mode="lines", name="Linear trend",
         line=dict(color="crimson", width=2, dash="dash")))
-    fig_a.update_layout(title="UPF Publications per Year",
+    fig_a.update_layout(title=f"{TOPIC_TITLE} — Publications per Year",
         xaxis_title="Year", yaxis_title="Papers published",
         template="plotly_white", bargap=0.25, legend=dict(x=0.02, y=0.98))
 
@@ -650,7 +664,7 @@ def fig_temporal(year_df, country_year_df, net_metrics_df):
         if c in pivot.columns:
             fig_b.add_trace(go.Scatter(x=pivot["year"], y=pivot[c],
                 mode="lines+markers", name=c, line=dict(width=2)))
-    fig_b.update_layout(title="Annual UPF Publications — Top 8 Countries",
+    fig_b.update_layout(title=f"{TOPIC_TITLE} — Annual Publications, Top 8 Countries",
         xaxis_title="Year", yaxis_title="Papers published", template="plotly_white",
         legend=dict(title="Country", x=1.01, y=0.99))
 
@@ -662,7 +676,7 @@ def fig_temporal(year_df, country_year_df, net_metrics_df):
         y=net_metrics_df["cumulative_edges"], mode="lines+markers",
         name="Collaborations (edges)", line=dict(color="tomato", width=2, dash="dot"),
         yaxis="y2"))
-    fig_c.update_layout(title="Cumulative Growth of the UPF Co-authorship Network",
+    fig_c.update_layout(title=f"{TOPIC_TITLE} — Cumulative Growth of the Co-authorship Network",
         xaxis_title="Year",
         yaxis=dict(title="Cumulative authors", side="left", showgrid=True),
         yaxis2=dict(title="Cumulative collaborations", side="right",
@@ -726,7 +740,7 @@ def fig_animated_network(G_lcc, G_plot, pos, edges_yr_df):
         data=_traces(ey[ey["year"] <= anim_years[0]]),
         frames=frames,
         layout=go.Layout(
-            title=dict(text="UPF Co-authorship Network — cumulative growth (2005 → present)",
+            title=dict(text=f"{TOPIC_TITLE} — Co-authorship Network, cumulative growth",
                        x=0.5, xanchor="center"),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -892,7 +906,7 @@ def fig_study_type_network(G_lcc, G_plot, pos, st_auth_df):
 
 EXPLANATIONS = {
     "Top-N Institutions": (
-        "Ranks institutions by the number of UPF papers. Toggle between "
+        "Ranks institutions by paper count. Toggle between "
         "<b>Papers</b> and <b>Citations</b>. Hover for full details."
     ),
     "Top-N Authors": (
@@ -915,14 +929,13 @@ EXPLANATIONS = {
         "Co-authored papers between top country pairs. Darker = more collaboration."
     ),
     "Author Citation Impact": (
-        "Papers vs citations on log scales. Top-right = prolific and highly cited."
+        "Papers (x) vs total citations (y), both on log scales."
     ),
     "Citations by Community": (
         "Total citations per Louvain community. Hover for papers and cit/paper."
     ),
     "Country Output vs Impact": (
-        "Left: paper count (volume). Right: citations per paper (quality proxy). "
-        "Rankings often diverge markedly between the two."
+        "Left: paper count. Right: citations per paper."
     ),
     "Top Funders": (
         "Paper count per funder (OpenAlex funding coverage is partial — "
@@ -1000,9 +1013,9 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
     REPORT = f"""
 <div class="report">
   <h2>About this analysis</h2>
-  <p>This dashboard summarises <b>{_total:,} papers</b> on ultra-processed food (UPF) retrieved
-  from <a href="https://openalex.org" target="_blank">OpenAlex</a> using the NOVA classification
-  search terms. The analysis covers <b>{len(_auth):,} unique authors</b> across
+  <p>This dashboard summarises <b>{_total:,} papers</b> on <b>{TOPIC_TITLE}</b> retrieved
+  from <a href="https://openalex.org" target="_blank">OpenAlex</a>.
+  The analysis covers <b>{len(_auth):,} unique authors</b> across
   <b>{len(_inst):,} institutions</b> in <b>{len(_ctr)} countries</b>.</p>
 
   <h2>Caveats</h2>
@@ -1136,14 +1149,14 @@ input.addEventListener('input',render);render();"""
     generated_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
     header = (f'<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
               f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-              f'<title>UPF Bibliometrics — Interactive Dashboard</title>\n'
+              f'<title>{TOPIC_TITLE} — Bibliometric Dashboard</title>\n'
               f'<style>{CSS}</style>\n</head>\n<body>\n'
               f'{DISCLAIMER}\n'
-              f'<h1>UPF Bibliometrics — Interactive Dashboard</h1>\n'
+              f'<h1>{TOPIC_TITLE} — Bibliometric Dashboard</h1>\n'
               f'<p>Generated: {generated_at} &nbsp;|&nbsp; '
               f'Source: <a href="https://openalex.org" target="_blank">OpenAlex</a></p>\n'
               f'{REPORT}\n{SEARCH_WIDGET}\n')
-    footer = f'\n<script>{SEARCH_JS}</script>\n<footer>Generated with Plotly and the UPF bibliometrics pipeline.</footer>\n</body></html>'
+    footer = f'\n<script>{SEARCH_JS}</script>\n<footer>Generated with Plotly · Data: <a href="https://openalex.org">OpenAlex</a></footer>\n</body></html>'
 
     parts = [header]
     first = True
@@ -1166,6 +1179,17 @@ input.addEventListener('input',render);render();"""
 def main():
     args = parse_args()
     out  = args.output_dir
+
+    if args.fetch:
+        script = os.path.join(os.path.dirname(__file__), "upf_bibliometrics.py")
+        print(f"Fetching data via {script} …")
+        result = subprocess.run(
+            [sys.executable, script, "--output-dir", out],
+            check=False,
+        )
+        if result.returncode != 0:
+            print("bibliometrics script exited with errors — aborting dashboard build.")
+            sys.exit(result.returncode)
 
     (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
      dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
@@ -1245,7 +1269,7 @@ def main():
     html = build_html(dashboard_figs, centrality_df, institutions_df, country_df,
                       authors_df, dept_df, funders_df, G_lcc, communities)
 
-    dash_path = os.path.join(out, "upf_dashboard.html")
+    dash_path = os.path.join(out, "dashboard.html")
     with open(dash_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     print(f"Saved → {dash_path}  ({os.path.getsize(dash_path)//1024} KB)")
