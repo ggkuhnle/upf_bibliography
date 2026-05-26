@@ -992,8 +992,10 @@ EXPLANATIONS = {
         "<b>Top-left</b>: stacked bar showing each prolific author's papers by position: "
         "first (blue), last (green), middle (orange). "
         "<b>Top-right</b>: same data as 100% proportions. "
-        "<b>Bottom-left</b>: scatter of total papers vs middle-author rate (all authors with ≥5 papers); "
-        "dashed line at 0.70. "
+        "<b>Bottom-left</b>: each point is an author with ≥5 papers. "
+        "X-axis = total papers; y-axis = middle-author rate (proportion of papers where the author is neither first nor last). "
+        "A high middle-author rate indicates participation in many collaborations without leading them. "
+        "The dashed line marks 0.70 as a reference threshold. "
         "<b>Bottom-right</b>: top-20 first-authors and top-20 last-authors."
     ),
 }
