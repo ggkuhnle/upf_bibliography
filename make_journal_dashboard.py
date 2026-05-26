@@ -13,13 +13,30 @@ Writes:
   output/journal_dashboard.html
 """
 
+import json as _json
 import os
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 OUTPUT_DIR  = "output"
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "journal_dashboard.html")
+
+def _load_cfg():
+    for _p in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                return _json.load(_f)
+    return {}
+
+_CFG    = _load_cfg()
+_PREFIX = _CFG.get("prefix", "")
+_TITLE  = _CFG.get("title", "Research")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{_PREFIX}_{name}" if _PREFIX else name
+
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf("journal_dashboard.html"))
 TOP_N       = 25   # journals shown in most charts
 TOP_TREND   = 10   # journals in the temporal trend chart
 
@@ -46,12 +63,9 @@ DISCLAIMER = (
 )
 
 print("Loading data…")
-j_df   = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_journal.csv"))
-jy_df  = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_journal_year.csv"))
-jst_df = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_journal_study_type.csv"))
-
-cohort_path = os.path.join(OUTPUT_DIR, "papers_by_cohort.csv")
-c_df = pd.read_csv(cohort_path) if os.path.exists(cohort_path) else None
+j_df   = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal.csv")))
+jy_df  = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal_year.csv")))
+jst_df = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal_study_type.csv")))
 
 # ── Filter non-journals (preprint servers, repositories, aggregators) ─────────
 # OpenAlex records these as primary sources but they are not peer-reviewed journals.

@@ -39,6 +39,11 @@ def _load_config() -> dict:
 
 _CFG = _load_config()
 TOPIC_TITLE = _CFG.get("title", "Research Bibliometrics")
+PREFIX = _CFG.get("prefix", "")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{PREFIX}_{name}" if PREFIX else name
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -93,26 +98,26 @@ DISCLAIMER = (
 
 def load_data(out):
     print("Loading CSVs…")
-    edges_df       = pd.read_csv(os.path.join(out, "coauthorship_edges.csv"))
-    authors_df     = pd.read_csv(os.path.join(out, "papers_by_author.csv"))
-    institutions_df = pd.read_csv(os.path.join(out, "papers_by_institution.csv"))
+    edges_df       = pd.read_csv(os.path.join(out, _pf("coauthorship_edges.csv")))
+    authors_df     = pd.read_csv(os.path.join(out, _pf("papers_by_author.csv")))
+    institutions_df = pd.read_csv(os.path.join(out, _pf("papers_by_institution.csv")))
     institutions_df = institutions_df[
         institutions_df["institution"].notna() & (institutions_df["institution"] != "")
     ].copy()
 
     try:
-        funders_df      = pd.read_csv(os.path.join(out, "papers_by_funder.csv"))
-        funding_cty_df  = pd.read_csv(os.path.join(out, "funding_by_country.csv"))
-        dept_df         = pd.read_csv(os.path.join(out, "papers_by_department.csv"))
+        funders_df      = pd.read_csv(os.path.join(out, _pf("papers_by_funder.csv")))
+        funding_cty_df  = pd.read_csv(os.path.join(out, _pf("funding_by_country.csv")))
+        dept_df         = pd.read_csv(os.path.join(out, _pf("papers_by_department.csv")))
     except FileNotFoundError:
         funders_df = funding_cty_df = dept_df = pd.DataFrame()
         print("  ⚠  Funding/department CSVs not found")
 
-    year_df         = pd.read_csv(os.path.join(out, "papers_by_year.csv"))
-    country_year_df = pd.read_csv(os.path.join(out, "papers_by_country_year.csv"))
-    net_metrics_df  = pd.read_csv(os.path.join(out, "network_metrics_by_year.csv"))
-    edges_yr_df     = pd.read_csv(os.path.join(out, "coauthorship_edges_by_year.csv"))
-    country_df      = pd.read_csv(os.path.join(out, "papers_by_country.csv"))
+    year_df         = pd.read_csv(os.path.join(out, _pf("papers_by_year.csv")))
+    country_year_df = pd.read_csv(os.path.join(out, _pf("papers_by_country_year.csv")))
+    net_metrics_df  = pd.read_csv(os.path.join(out, _pf("network_metrics_by_year.csv")))
+    edges_yr_df     = pd.read_csv(os.path.join(out, _pf("coauthorship_edges_by_year.csv")))
+    country_df      = pd.read_csv(os.path.join(out, _pf("papers_by_country.csv")))
     country_df      = country_df[country_df["country"].notna() & (country_df["country"] != "")].copy()
 
     # Clip temporal data to 2000+
@@ -130,16 +135,16 @@ def load_data(out):
         path = os.path.join(out, name)
         if os.path.exists(path):
             locals()[attr]  # just to reference it
-    _st_path      = os.path.join(out, "papers_by_study_type.csv")
-    _st_year_path = os.path.join(out, "papers_by_study_type_year.csv")
-    _st_auth_path = os.path.join(out, "papers_by_author_study_type.csv")
+    _st_path      = os.path.join(out, _pf("papers_by_study_type.csv"))
+    _st_year_path = os.path.join(out, _pf("papers_by_study_type_year.csv"))
+    _st_auth_path = os.path.join(out, _pf("papers_by_author_study_type.csv"))
     if os.path.exists(_st_path):
         st_df      = pd.read_csv(_st_path)
         st_year_df = pd.read_csv(_st_year_path)
         st_auth_df = pd.read_csv(_st_auth_path)
         print(f"  Study type data loaded  ({int(st_df['papers'].sum()):,} papers classified)")
     else:
-        print("  ⚠  Study type CSVs not found — re-run upf_bibliometrics.py")
+        print("  ⚠  Study type CSVs not found — re-run bibliometrics.py")
 
     print(f"  {len(edges_df):,} edge rows · {len(authors_df):,} author rows · "
           f"{len(institutions_df):,} institution rows")
@@ -1174,6 +1179,193 @@ input.addEventListener('input',render);render();"""
     return "\n".join(parts)
 
 
+# ── Index page ────────────────────────────────────────────────────────────────
+
+def make_index(out, authors_df, institutions_df, country_df, year_df):
+    """Generate output/index.html from config + live CSV stats."""
+    p      = _pf  # prefix helper
+    kws    = _CFG.get("keywords", [])
+    kw_str = ", ".join(f"<code>{k}</code>" for k in kws)
+
+    n_papers  = int(year_df["papers"].sum())
+    n_authors = len(authors_df[authors_df["author_name"].notna() & (authors_df["author_name"] != "")])
+    n_ctr     = len(country_df)
+    n_inst    = len(institutions_df)
+
+    generated = pd.Timestamp.now().strftime("%B %Y")
+
+    CARDS = [
+        ("c-blue",   "btn-blue",   "Research Overview",
+         "Publications by country, institution and author. Year-by-year growth and co-authorship network statistics.",
+         [("Top countries &amp; institutions", ""),
+          ("Temporal trends", ""),
+          ("Author rankings", ""),
+          ("Network metrics over time", "")],
+         p("dashboard.html")),
+        ("c-teal",   "btn-teal",   "Co-authorship Network",
+         "Interactive explorer: watch the collaboration network evolve year by year. Filter by minimum papers, search for an author.",
+         [("Year slider &amp; animation", ""),
+          ("Author search &amp; highlight", ""),
+          ("Min-papers threshold", ""),
+          ("Community colour-coding", "")],
+         p("network_interactive.html")),
+        ("c-rose",   "btn-rose",   "World Map",
+         "Global distribution of research institutions. Circle size proportional to publication output.",
+         [("Institution-level bubbles", ""),
+          ("Colour-coded by region", ""),
+          ("Hover for papers &amp; citations", "")],
+         p("world_map.html")),
+        ("c-purple", "btn-purple", "Study Types",
+         "Classification of papers by study design: RCTs, observational studies, systematic reviews, meta-analyses.",
+         [("Overall design breakdown", ""),
+          ("Trends over time", ""),
+          ("MeSH-tag classification", "")],
+         p("study_type.html")),
+        ("c-orange", "btn-orange", "Study Type Network",
+         "Co-authorship network with nodes shaped and coloured by each author's dominant study type.",
+         [("Shape = study design (circle, diamond, triangle…)", ""),
+          ("Year slider, animation &amp; author search", ""),
+          ("Clickable legend to isolate study types", "")],
+         p("network_study_type.html")),
+        ("", "",                   "Journal Analysis",
+         "Where is research published? Top journals by volume and citation impact, study-type breakdown per journal.",
+         [("Top journals by papers &amp; citations per paper", ""),
+          ("Study-type mix by journal (100% stacked bar)", ""),
+          ("Publication trends", "")],
+         p("journal_dashboard.html")),
+    ]
+
+    card_html = ""
+    for accent, btn_cls, title, desc, items, href in CARDS:
+        accent_style = f'class="card-accent {accent}"' if accent else 'class="card-accent" style="background:#16a085"'
+        btn_style    = f'class="btn {btn_cls}"' if btn_cls else 'class="btn" style="background:#16a085;color:#fff"'
+        lis = "".join(f"<li>{li}</li>" for li, _ in items)
+        card_html += f"""
+    <div class="card">
+      <div {accent_style}></div>
+      <div class="card-body">
+        <h2>{title}</h2>
+        <p>{desc}</p>
+        <ul>{lis}</ul>
+      </div>
+      <div class="card-foot">
+        <a {btn_style} href="{href}">Open →</a>
+      </div>
+    </div>"""
+
+    # Check if world_map.png exists
+    png_section = ""
+    if os.path.exists(os.path.join(out, p("world_map.png"))):
+        png_section = f"""
+  <h3 class="sec">Static map</h3>
+  <div style="margin-bottom:48px">
+    <a href="{p('world_map.png')}" target="_blank">
+      <img src="{p('world_map.png')}" alt="Global Research Landscape"
+           style="width:100%;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);display:block">
+    </a>
+    <p style="font-size:.8rem;color:#888;margin-top:8px;text-align:center">Click to open full-resolution PNG</p>
+  </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{TOPIC_TITLE} — Bibliometrics</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+       background:#f5f6fa;color:#2c3e50;line-height:1.6}}
+  #hdr{{background:linear-gradient(135deg,#1a2742 0%,#2c4a8a 100%);
+       color:#fff;padding:48px 32px 40px;text-align:center}}
+  #hdr h1{{font-size:2rem;font-weight:800;letter-spacing:-.5px;margin-bottom:10px}}
+  #hdr p.sub{{font-size:1.05rem;opacity:.80;max-width:640px;margin:0 auto 28px}}
+  .stats{{display:flex;flex-wrap:wrap;justify-content:center;gap:24px;max-width:700px;margin:0 auto}}
+  .stat{{background:rgba(255,255,255,.12);border-radius:10px;padding:12px 24px;text-align:center;min-width:120px}}
+  .stat .n{{font-size:1.8rem;font-weight:700;display:block}}
+  .stat .l{{font-size:.78rem;opacity:.75;text-transform:uppercase;letter-spacing:.5px}}
+  main{{max-width:900px;margin:0 auto;padding:36px 24px 80px}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;margin-bottom:48px}}
+  .card{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
+        overflow:hidden;display:flex;flex-direction:column;transition:transform .15s,box-shadow .15s}}
+  .card:hover{{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.12)}}
+  .card-accent{{height:5px}}
+  .card-body{{padding:20px 22px;flex:1}}
+  .card-body h2{{font-size:1.05rem;font-weight:700;color:#1a2742;margin-bottom:8px}}
+  .card-body p{{font-size:.88rem;color:#555;line-height:1.55}}
+  .card-body ul{{font-size:.84rem;color:#555;padding-left:16px;margin-top:8px}}
+  .card-body li{{margin-bottom:4px}}
+  .card-foot{{padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:flex-end}}
+  .btn{{display:inline-block;padding:7px 18px;border-radius:20px;font-size:.82rem;font-weight:600;
+       text-decoration:none;transition:opacity .15s}}
+  .btn:hover{{opacity:.85}}
+  .c-blue{{background:#2980b9}}.btn-blue{{background:#2980b9;color:#fff}}
+  .c-teal{{background:#16a085}}.btn-teal{{background:#16a085;color:#fff}}
+  .c-purple{{background:#8e44ad}}.btn-purple{{background:#8e44ad;color:#fff}}
+  .c-rose{{background:#e84393}}.btn-rose{{background:#e84393;color:#fff}}
+  .c-orange{{background:#e67e22}}.btn-orange{{background:#e67e22;color:#fff}}
+  h3.sec{{font-size:1rem;font-weight:700;color:#888;text-transform:uppercase;
+          letter-spacing:1px;margin-bottom:16px;padding-bottom:6px;border-bottom:2px solid #eee}}
+  .methods{{background:#fff;border-radius:10px;padding:24px 28px;
+           box-shadow:0 2px 8px rgba(0,0,0,.07);margin-top:8px}}
+  .methods h3{{font-size:1rem;color:#1a2742;font-weight:700;margin-bottom:10px}}
+  .methods p,.methods li{{font-size:.875rem;color:#555;line-height:1.6}}
+  .methods ul{{padding-left:18px;margin-top:6px}}
+  .methods code{{background:#f0f2f6;padding:1px 5px;border-radius:3px;font-size:.82rem;font-family:monospace}}
+  footer{{text-align:center;padding:24px;font-size:.78rem;color:#aaa}}
+  a{{color:inherit}}
+</style>
+</head>
+<body>
+<div style="background:#fff8e1;border-top:4px solid #f9a825;border-bottom:1px solid #f9a825;padding:13px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:.88rem;color:#4a3800;line-height:1.55">
+  <strong>Disclaimer:</strong> This page presents automatically generated bibliometric data retrieved from <a href="https://openalex.org" style="color:#4a3800;font-weight:600" target="_blank">OpenAlex</a>. It does not represent the views, opinions, or endorsement of any individual, institution, or organisation. Data may contain errors, omissions, or misattributions inherent to automated retrieval. Results reflect publication patterns only and should not be interpreted as assessments of individual researchers or institutions.
+</div>
+<div id="hdr">
+  <h1>{TOPIC_TITLE} — Bibliometric Analysis</h1>
+  <p class="sub">An open analysis using <a href="https://openalex.org" target="_blank" style="color:#fff;text-decoration:underline">OpenAlex</a>.</p>
+  <div class="stats">
+    <div class="stat"><span class="n">{n_papers:,}</span><span class="l">Papers</span></div>
+    <div class="stat"><span class="n">{n_authors:,}</span><span class="l">Authors</span></div>
+    <div class="stat"><span class="n">{n_ctr:,}</span><span class="l">Countries</span></div>
+    <div class="stat"><span class="n">{n_inst:,}</span><span class="l">Institutions</span></div>
+  </div>
+</div>
+<main>
+  <h3 class="sec" style="margin-top:8px">Dashboards</h3>
+  <div class="grid">{card_html}
+  </div>
+{png_section}
+  <h3 class="sec">Methods &amp; Data</h3>
+  <div class="methods">
+    <h3>Data source</h3>
+    <p>All publication data is retrieved from <a href="https://openalex.org" style="color:#2980b9">OpenAlex</a>
+    — an open, freely accessible scholarly database. No API key is required.
+    Papers are identified by searching titles and abstracts for: {kw_str}.</p>
+    <h3 style="margin-top:16px">Caveats</h3>
+    <ul>
+      <li>Author-name disambiguation is handled by OpenAlex; occasional mis-attribution may occur.</li>
+      <li>Institution assignment uses the most frequent affiliation across an author's papers.</li>
+      <li>Funding data is incomplete — many papers have no recorded funder.</li>
+      <li>Books and grey literature are poorly indexed.</li>
+      <li>Study-type classification uses PubMed MeSH tags where available, falling back to title keywords; unclassified papers appear as <em>Other</em>.</li>
+      <li>Author-position data (first / middle / last) is as assigned by OpenAlex.</li>
+    </ul>
+    <h3 style="margin-top:16px">Code</h3>
+    <p>All code is open-source.
+    Entry point: <code>python make_dashboard.py --fetch</code> (retrieves data and rebuilds all charts).
+    See <a href="https://github.com/ggkuhnle/upf_bibliography" style="color:#2980b9" target="_blank">GitHub</a> for full source.</p>
+  </div>
+</main>
+<footer>Data: <a href="https://openalex.org">OpenAlex</a> · Analysis by G. Kuhnle · Generated {generated}</footer>
+</body>
+</html>"""
+
+    idx_path = os.path.join(out, "index.html")
+    with open(idx_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print(f"Saved → {idx_path}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1181,7 +1373,7 @@ def main():
     out  = args.output_dir
 
     if args.fetch:
-        script = os.path.join(os.path.dirname(__file__), "upf_bibliometrics.py")
+        script = os.path.join(os.path.dirname(__file__), "bibliometrics.py")
         print(f"Fetching data via {script} …")
         result = subprocess.run(
             [sys.executable, script, "--output-dir", out],
@@ -1201,7 +1393,7 @@ def main():
     G_plot, pos          = compute_layout(G_lcc)
 
     # Save centrality CSV
-    cent_path = os.path.join(out, "author_centrality.csv")
+    cent_path = os.path.join(out, _pf("author_centrality.csv"))
     cols = ["author_id","name","institution","country","community",
             "papers","degree","degree_centrality","betweenness","pagerank","clustering"]
     centrality_df[cols].sort_values("betweenness", ascending=False).to_csv(cent_path, index=False)
@@ -1253,7 +1445,7 @@ def main():
         print("  Building author position figure…")
         dashboard_figs.append(("Author Position Analysis", fig_author_position(authors_df)))
     else:
-        print("  ⚠  Author position columns not found — re-run upf_bibliometrics.py")
+        print("  ⚠  Author position columns not found — re-run bibliometrics.py")
 
     # §12 study type figures
     if st_df is not None:
@@ -1269,10 +1461,13 @@ def main():
     html = build_html(dashboard_figs, centrality_df, institutions_df, country_df,
                       authors_df, dept_df, funders_df, G_lcc, communities)
 
-    dash_path = os.path.join(out, "dashboard.html")
+    dash_path = os.path.join(out, _pf("dashboard.html"))
     with open(dash_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     print(f"Saved → {dash_path}  ({os.path.getsize(dash_path)//1024} KB)")
+
+    print("Building index…")
+    make_index(out, authors_df, institutions_df, country_df, year_df)
 
 
 if __name__ == "__main__":

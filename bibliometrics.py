@@ -67,7 +67,7 @@ log = logging.getLogger(__name__)
 
 def _session() -> requests.Session:
     s = requests.Session()
-    s.headers.update({"User-Agent": f"upf_bibliometrics/1.0 (mailto:{MAILTO})"})
+    s.headers.update({"User-Agent": f"bibliometrics/1.0 (mailto:{MAILTO})"})
     return s
 
 
@@ -1007,9 +1007,17 @@ def main() -> None:
     args = parse_args()
 
     session = _session()
+    prefix  = _CFG.get("prefix", "")
+
+    def _pf(name: str) -> str:
+        return f"{prefix}_{name}" if prefix else name
+
+    def _out(name: str) -> str:
+        return os.path.join(args.output_dir, _pf(name))
 
     log.info("Search terms: %s", args.terms)
     log.info("Output dir  : %s", args.output_dir)
+    log.info("Prefix      : %s", prefix or "(none)")
     if args.dry_run:
         log.info("DRY RUN — only first 2 pages will be fetched")
 
@@ -1022,142 +1030,83 @@ def main() -> None:
     rows = flatten_works(works)
 
     country_tbl = papers_by_country(rows)
-    inst_tbl = papers_by_institution(rows)
-    author_tbl = papers_by_author(rows)
+    inst_tbl    = papers_by_institution(rows)
+    author_tbl  = papers_by_author(rows)
 
-    out = args.output_dir
-    write_csv(
-        os.path.join(out, "papers_by_country.csv"),
-        ["country", "papers", "citations"],
-        country_tbl,
-    )
-    write_csv(
-        os.path.join(out, "papers_by_institution.csv"),
-        ["institution", "country", "papers", "citations"],
-        inst_tbl,
-    )
-    write_csv(
-        os.path.join(out, "papers_by_author.csv"),
-        ["author_id", "author_name", "institution", "country",
-         "papers", "citations",
-         "first_author_papers", "last_author_papers", "middle_author_papers",
-         "middle_author_rate"],
-        author_tbl,
-    )
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    write_csv(_out("papers_by_country.csv"),
+              ["country", "papers", "citations"], country_tbl)
+    write_csv(_out("papers_by_institution.csv"),
+              ["institution", "country", "papers", "citations"], inst_tbl)
+    write_csv(_out("papers_by_author.csv"),
+              ["author_id", "author_name", "institution", "country",
+               "papers", "citations",
+               "first_author_papers", "last_author_papers", "middle_author_papers",
+               "middle_author_rate"],
+              author_tbl)
 
     dept_tbl = papers_by_department(rows)
-    write_csv(
-        os.path.join(out, "papers_by_department.csv"),
-        ["department", "institution", "country", "papers", "citations"],
-        dept_tbl,
-    )
+    write_csv(_out("papers_by_department.csv"),
+              ["department", "institution", "country", "papers", "citations"], dept_tbl)
 
     funder_tbl = papers_by_funder(works)
-    write_csv(
-        os.path.join(out, "papers_by_funder.csv"),
-        ["funder_id", "funder_name", "papers", "citations"],
-        funder_tbl,
-    )
+    write_csv(_out("papers_by_funder.csv"),
+              ["funder_id", "funder_name", "papers", "citations"], funder_tbl)
     funding_country_tbl = funding_by_country(works, rows)
-    write_csv(
-        os.path.join(out, "funding_by_country.csv"),
-        ["country", "papers", "funded_papers", "pct_funded", "citations"],
-        funding_country_tbl,
-    )
+    write_csv(_out("funding_by_country.csv"),
+              ["country", "papers", "funded_papers", "pct_funded", "citations"],
+              funding_country_tbl)
 
     study_type_tbl = papers_by_study_type(works)
-    write_csv(
-        os.path.join(out, "papers_by_study_type.csv"),
-        ["study_type", "papers", "pct", "citations"],
-        study_type_tbl,
-    )
+    write_csv(_out("papers_by_study_type.csv"),
+              ["study_type", "papers", "pct", "citations"], study_type_tbl)
     study_type_year_tbl = papers_by_study_type_year(works)
-    write_csv(
-        os.path.join(out, "papers_by_study_type_year.csv"),
-        ["year", "study_type", "papers", "citations"],
-        study_type_year_tbl,
-    )
+    write_csv(_out("papers_by_study_type_year.csv"),
+              ["year", "study_type", "papers", "citations"], study_type_year_tbl)
     author_st_tbl = papers_by_author_study_type(works, rows)
-    write_csv(
-        os.path.join(out, "papers_by_author_study_type.csv"),
-        ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
-        author_st_tbl,
-    )
+    write_csv(_out("papers_by_author_study_type.csv"),
+              ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
+              author_st_tbl)
 
     year_tbl = papers_by_year(works)
-    write_csv(
-        os.path.join(out, "papers_by_year.csv"),
-        ["year", "papers", "citations"],
-        year_tbl,
-    )
+    write_csv(_out("papers_by_year.csv"), ["year", "papers", "citations"], year_tbl)
     country_year_tbl = papers_by_country_year(rows)
-    write_csv(
-        os.path.join(out, "papers_by_country_year.csv"),
-        ["country", "year", "papers", "citations"],
-        country_year_tbl,
-    )
+    write_csv(_out("papers_by_country_year.csv"),
+              ["country", "year", "papers", "citations"], country_year_tbl)
     net_metrics_tbl = network_metrics_by_year(rows)
-    write_csv(
-        os.path.join(out, "network_metrics_by_year.csv"),
-        ["year", "papers_this_year", "cumulative_papers", "cumulative_authors", "cumulative_edges"],
-        net_metrics_tbl,
-    )
+    write_csv(_out("network_metrics_by_year.csv"),
+              ["year", "papers_this_year", "cumulative_papers", "cumulative_authors",
+               "cumulative_edges"],
+              net_metrics_tbl)
 
     edges_by_year = coauthorship_edges_by_year(rows)
-    write_csv(
-        os.path.join(out, "coauthorship_edges_by_year.csv"),
-        ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
-        edges_by_year,
-    )
+    write_csv(_out("coauthorship_edges_by_year.csv"),
+              ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
+              edges_by_year)
 
+    _edge_cols = ["author1_id", "author1_name", "author1_institution", "author1_country",
+                  "author2_id", "author2_name", "author2_institution", "author2_country",
+                  "shared_papers"]
     edges = coauthorship_edges(rows)
-    write_csv(
-        os.path.join(out, "coauthorship_edges.csv"),
-        [
-            "author1_id", "author1_name", "author1_institution", "author1_country",
-            "author2_id", "author2_name", "author2_institution", "author2_country",
-            "shared_papers",
-        ],
-        edges,
-    )
+    write_csv(_out("coauthorship_edges.csv"), _edge_cols, edges)
 
-    # Primary (first ↔ last) co-authorship edges
     primary_edges = primary_coauthorship_edges(rows)
-    write_csv(
-        os.path.join(out, "coauthorship_edges_primary.csv"),
-        [
-            "author1_id", "author1_name", "author1_institution", "author1_country",
-            "author2_id", "author2_name", "author2_institution", "author2_country",
-            "shared_papers",
-        ],
-        primary_edges,
-    )
+    write_csv(_out("coauthorship_edges_primary.csv"), _edge_cols, primary_edges)
     primary_edges_yr = primary_coauthorship_edges_by_year(rows)
-    write_csv(
-        os.path.join(out, "coauthorship_edges_by_year_primary.csv"),
-        ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
-        primary_edges_yr,
-    )
+    write_csv(_out("coauthorship_edges_by_year_primary.csv"),
+              ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
+              primary_edges_yr)
 
-    # Journal analyses
     journal_tbl = papers_by_journal(works)
-    write_csv(
-        os.path.join(out, "papers_by_journal.csv"),
-        ["journal", "journal_id", "papers", "citations"],
-        journal_tbl,
-    )
+    write_csv(_out("papers_by_journal.csv"),
+              ["journal", "journal_id", "papers", "citations"], journal_tbl)
     journal_year_tbl = papers_by_journal_year(works)
-    write_csv(
-        os.path.join(out, "papers_by_journal_year.csv"),
-        ["journal", "year", "papers", "citations"],
-        journal_year_tbl,
-    )
+    write_csv(_out("papers_by_journal_year.csv"),
+              ["journal", "year", "papers", "citations"], journal_year_tbl)
     journal_st_tbl = papers_by_journal_study_type(works)
-    write_csv(
-        os.path.join(out, "papers_by_journal_study_type.csv"),
-        ["journal", "study_type", "papers", "citations"],
-        journal_st_tbl,
-    )
+    write_csv(_out("papers_by_journal_study_type.csv"),
+              ["journal", "study_type", "papers", "citations"], journal_st_tbl)
 
     print_summary(works, rows, country_tbl, inst_tbl, study_type_tbl)
 

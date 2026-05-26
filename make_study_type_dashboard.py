@@ -2,7 +2,7 @@
 """
 make_study_type_dashboard.py
 Build output/study_type.html from papers_by_study_type.csv and
-papers_by_study_type_year.csv (written by upf_bibliometrics.py).
+papers_by_study_type_year.csv (written by bibliometrics.py).
 
 Usage:
     python make_study_type_dashboard.py
@@ -10,12 +10,28 @@ Usage:
 """
 
 import argparse
+import json as _json
 import os
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 OUTPUT_DIR = "output"
+
+def _load_cfg():
+    for _p in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                return _json.load(_f)
+    return {}
+
+_CFG    = _load_cfg()
+_PREFIX = _CFG.get("prefix", "")
+_TITLE  = _CFG.get("title", "Research")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{_PREFIX}_{name}" if _PREFIX else name
 
 DISCLAIMER = (
     '<div style="background:#fff8e1;border-top:4px solid #f9a825;'
@@ -235,12 +251,12 @@ def main() -> None:
     parser.add_argument("--output-dir", default=OUTPUT_DIR)
     args = parser.parse_args()
 
-    st_path      = os.path.join(args.output_dir, "papers_by_study_type.csv")
-    st_year_path = os.path.join(args.output_dir, "papers_by_study_type_year.csv")
+    st_path      = os.path.join(args.output_dir, _pf("papers_by_study_type.csv"))
+    st_year_path = os.path.join(args.output_dir, _pf("papers_by_study_type_year.csv"))
 
     for p in (st_path, st_year_path):
         if not os.path.exists(p):
-            print(f"Missing {p} — run upf_bibliometrics.py first.")
+            print(f"Missing {p} — run bibliometrics.py first.")
             raise SystemExit(1)
 
     st_df      = pd.read_csv(st_path)
@@ -248,7 +264,7 @@ def main() -> None:
 
     html = build_html(st_df, st_year_df)
 
-    out_path = os.path.join(args.output_dir, "study_type.html")
+    out_path = os.path.join(args.output_dir, _pf("study_type.html"))
     os.makedirs(args.output_dir, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)

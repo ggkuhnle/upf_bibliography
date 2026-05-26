@@ -9,12 +9,28 @@ Outputs:
   output/world_map.png    1600×900 static image (drag-and-drop into Substack)
 """
 
+import json as _json
 import os
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
 OUTPUT_DIR = "output"
+
+def _load_cfg():
+    for _p in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                return _json.load(_f)
+    return {}
+
+_CFG    = _load_cfg()
+_PREFIX = _CFG.get("prefix", "")
+_TITLE  = _CFG.get("title", "Research")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{_PREFIX}_{name}" if _PREFIX else name
 
 # ── Institution lat/lon (top institutions hand-coded; rest fall back to country) ─
 INST_COORDS = {
@@ -204,7 +220,7 @@ REGION_COLORS = {
 print("Loading data …")
 
 # Institution-level data
-inst_df = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_institution.csv"))
+inst_df = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_institution.csv")))
 inst_df = inst_df[inst_df["institution"].notna() & (inst_df["institution"] != "")]
 inst_df = inst_df[inst_df["country"].notna() & (inst_df["country"] != "")]
 
@@ -375,7 +391,7 @@ fig.add_annotation(
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Interactive HTML
-html_path = os.path.join(OUTPUT_DIR, "world_map.html")
+html_path = os.path.join(OUTPUT_DIR, _pf("world_map.html"))
 fig.write_html(
     html_path,
     include_plotlyjs="cdn",
@@ -386,7 +402,7 @@ fig.write_html(
 print(f"HTML → {html_path}  ({os.path.getsize(html_path)//1024} KB)")
 
 # Static PNG for Substack
-png_path = os.path.join(OUTPUT_DIR, "world_map.png")
+png_path = os.path.join(OUTPUT_DIR, _pf("world_map.png"))
 try:
     pio.write_image(fig, png_path, width=1600, height=900, scale=2)
     print(f"PNG  → {png_path}  ({os.path.getsize(png_path)//1024} KB)")

@@ -4,7 +4,7 @@ make_study_type_network.py
 Co-authorship network where each node is coloured and shaped by the author's
 dominant study type (RCT / Observational / Systematic Review etc.).
 
-Requires papers_by_author_study_type.csv produced by upf_bibliometrics.py.
+Requires papers_by_author_study_type.csv produced by bibliometrics.py.
 
 Usage:
     python make_study_type_network.py
@@ -14,6 +14,7 @@ Usage:
 import argparse
 import collections
 import json
+import json as _json
 import os
 
 import networkx as nx
@@ -28,9 +29,24 @@ def _args():
 
 _ARGS = _args()
 
+def _load_cfg():
+    for _p in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                return _json.load(_f)
+    return {}
+
+_CFG    = _load_cfg()
+_PREFIX = _CFG.get("prefix", "")
+_TITLE  = _CFG.get("title", "Research")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{_PREFIX}_{name}" if _PREFIX else name
+
 OUTPUT_DIR  = "output"
 _suffix     = "_primary" if _ARGS.primary else ""
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, f"network_study_type{_suffix}.html")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf(f"network_study_type{_suffix}.html"))
 MIN_PAPERS  = 1
 PLOT_CAP    = 600
 LAYOUT_SEED = 42
@@ -49,15 +65,15 @@ ST_INDEX = {s["name"]: i for i, s in enumerate(ST_STYLES)}
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 print("Loading data…" + (" [primary-author mode]" if _ARGS.primary else ""))
-_e  = "coauthorship_edges_primary.csv"         if _ARGS.primary else "coauthorship_edges.csv"
-_ey = "coauthorship_edges_by_year_primary.csv" if _ARGS.primary else "coauthorship_edges_by_year.csv"
+_e  = _pf("coauthorship_edges_primary.csv")         if _ARGS.primary else _pf("coauthorship_edges.csv")
+_ey = _pf("coauthorship_edges_by_year_primary.csv") if _ARGS.primary else _pf("coauthorship_edges_by_year.csv")
 edges_df    = pd.read_csv(os.path.join(OUTPUT_DIR, _e))
-authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_author.csv"))
+authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_author.csv")))
 edges_yr_df = pd.read_csv(os.path.join(OUTPUT_DIR, _ey))
 
-author_st_path = os.path.join(OUTPUT_DIR, "papers_by_author_study_type.csv")
+author_st_path = os.path.join(OUTPUT_DIR, _pf("papers_by_author_study_type.csv"))
 if not os.path.exists(author_st_path):
-    print(f"Missing {author_st_path} — run upf_bibliometrics.py first.")
+    print(f"Missing {author_st_path} — run bibliometrics.py first.")
     raise SystemExit(1)
 author_st_df = pd.read_csv(author_st_path)
 

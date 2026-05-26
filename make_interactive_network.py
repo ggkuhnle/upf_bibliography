@@ -12,6 +12,7 @@ Usage:
 import argparse
 import collections
 import json
+import json as _json
 import os
 
 import networkx as nx
@@ -26,10 +27,25 @@ def _args():
 
 _ARGS = _args()
 
+def _load_cfg():
+    for _p in [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]:
+        if os.path.exists(_p):
+            with open(_p, encoding="utf-8") as _f:
+                return _json.load(_f)
+    return {}
+
+_CFG    = _load_cfg()
+_PREFIX = _CFG.get("prefix", "")
+_TITLE  = _CFG.get("title", "Research")
+
+def _pf(name):
+    """Apply topic prefix to a filename."""
+    return f"{_PREFIX}_{name}" if _PREFIX else name
+
 # ── Config ────────────────────────────────────────────────────────────────────
 OUTPUT_DIR  = "output"
 _suffix     = "_primary" if _ARGS.primary else ""
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, f"network_interactive{_suffix}.html")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf(f"network_interactive{_suffix}.html"))
 MIN_PAPERS  = 3
 PLOT_CAP    = 400
 LAYOUT_SEED = 42
@@ -44,10 +60,10 @@ PALETTE = [
 
 # ── Load ──────────────────────────────────────────────────────────────────────
 print("Loading data…" + (" [primary-author mode]" if _ARGS.primary else ""))
-_e  = "coauthorship_edges_primary.csv"     if _ARGS.primary else "coauthorship_edges.csv"
-_ey = "coauthorship_edges_by_year_primary.csv" if _ARGS.primary else "coauthorship_edges_by_year.csv"
+_e  = _pf("coauthorship_edges_primary.csv")     if _ARGS.primary else _pf("coauthorship_edges.csv")
+_ey = _pf("coauthorship_edges_by_year_primary.csv") if _ARGS.primary else _pf("coauthorship_edges_by_year.csv")
 edges_df    = pd.read_csv(os.path.join(OUTPUT_DIR, _e))
-authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_author.csv"))
+authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_author.csv")))
 edges_yr_df = pd.read_csv(os.path.join(OUTPUT_DIR, _ey))
 
 auth_lookup: dict = {}
