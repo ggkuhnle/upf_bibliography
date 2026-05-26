@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
 make_world_map.py
-Global UPF research map — circles at institution level, sized by publication
-count.  Suitable for embedding in a Substack post.
+Global research map — circles at institution level, sized by publication count.
 
 Outputs:
-  output/world_map.html   interactive (embed via iframe in Substack)
-  output/world_map.png    1600×900 static image (drag-and-drop into Substack)
+  output/<prefix>_world_map.html   interactive
+  output/<prefix>_world_map.png    1600x900 static image
 """
 
+import argparse
 import json as _json
 import os
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -29,7 +30,6 @@ _PREFIX = _CFG.get("prefix", "")
 _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
-    """Apply topic prefix to a filename."""
     return f"{_PREFIX}_{name}" if _PREFIX else name
 
 # ── Institution lat/lon (top institutions hand-coded; rest fall back to country) ─
@@ -120,7 +120,6 @@ INST_COORDS = {
     "ETH Zurich":                                          (47.38,   8.55),
     "University of Zurich":                                (47.37,   8.55),
     "University of Geneva":                                (46.20,   6.14),
-    "University of Toronto":                               (43.66, -79.40),
     "McGill University":                                   (45.50, -73.58),
     "University of British Columbia":                      (49.26, -123.25),
     "Stanford University":                                  (37.43, -122.17),
@@ -171,7 +170,7 @@ COUNTRY_CENTROIDS = {
     "PW": (7.5, 134.6), "QA": (25.4, 51.2), "RO": (45.9, 24.9), "RU": (61.5, 105.3),
     "RW": (-1.9, 29.9), "SA": (23.9, 45.1), "SN": (14.5, -14.5), "RS": (44.0, 21.0),
     "SD": (12.9, 30.2), "SG": (1.4, 103.8), "SK": (48.7, 19.7), "SI": (46.2, 15.0),
-    "SO": (5.2, 46.2), "ZA": (-30.6, 22.9), "ES": (40.5, -3.7), "LK": (7.9, 80.8),
+    "SO": (5.2, 46.2), "ZA": (-30.6, 22.9), "ES": (40.5, -3.7),
     "ST": (0.2, 6.6), "SE": (60.1, 18.6), "CH": (46.8, 8.2), "TW": (23.7, 121.0),
     "TJ": (38.9, 71.3), "TZ": (-6.4, 34.9), "TH": (15.9, 100.9), "TT": (10.7, -61.2),
     "TN": (33.9, 9.5), "TR": (38.9, 35.2), "UA": (48.4, 31.2), "UG": (1.4, 32.3),
@@ -181,7 +180,7 @@ COUNTRY_CENTROIDS = {
     "XK": (42.6, 20.9), "GP": (16.3, -61.5), "GF": (4.0, -53.1), "AS": (-14.3, -170.7),
 }
 
-# ── Region colour map (by country ISO-2) ────────────────────────────────────
+# ── Region colour map ─────────────────────────────────────────────────────────
 def region_of(country_code):
     latin_america = {"BR","MX","AR","CL","CO","PE","VE","EC","BO","UY","PY",
                      "CR","GT","HN","SV","NI","PA","CU","DO","JM","TT","BB",
@@ -207,160 +206,29 @@ def region_of(country_code):
     return "Other"
 
 REGION_COLORS = {
-    "Latin America":         "#e84393",   # vivid pink-red  (Brazil dominates)
-    "North America":         "#e74c3c",   # clear red
-    "Europe":                "#2980b9",   # strong blue
-    "Asia-Pacific":          "#27ae60",   # green
-    "Middle East & N. Africa": "#f39c12", # amber
-    "Sub-Saharan Africa":    "#8e44ad",   # purple
-    "Other":                 "#95a5a6",   # grey
+    "Latin America":           "#e84393",
+    "North America":           "#e74c3c",
+    "Europe":                  "#2980b9",
+    "Asia-Pacific":            "#27ae60",
+    "Middle East & N. Africa": "#f39c12",
+    "Sub-Saharan Africa":      "#8e44ad",
+    "Other":                   "#95a5a6",
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-print("Loading data …")
-
-# Institution-level data
-inst_df = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_institution.csv")))
-inst_df = inst_df[inst_df["institution"].notna() & (inst_df["institution"] != "")]
-inst_df = inst_df[inst_df["country"].notna() & (inst_df["country"] != "")]
-
-# Resolve coordinates: try institution dict first, then country centroid
-def resolve_coords(row):
-    coords = INST_COORDS.get(row["institution"])
-    if coords:
-        return coords
-    return COUNTRY_CENTROIDS.get(row["country"], (None, None))
-
-inst_df[["lat", "lon"]] = inst_df.apply(
-    lambda r: pd.Series(resolve_coords(r)), axis=1
-)
-inst_df = inst_df[inst_df["lat"].notna()]
-
-# For institutions that share coordinates (same city), add tiny jitter so
-# circles don't perfectly overlap — makes the clusters visible
-import numpy as np
-rng = np.random.default_rng(42)
-inst_df["lat"] = inst_df["lat"] + rng.uniform(-0.08, 0.08, len(inst_df))
-inst_df["lon"] = inst_df["lon"] + rng.uniform(-0.12, 0.12, len(inst_df))
-
-inst_df["region"] = inst_df["country"].map(region_of)
-
-# Sqrt-scale marker sizes; cap so tiny dots are still visible
-max_p = inst_df["papers"].max()
-inst_df["marker_size"] = np.sqrt(inst_df["papers"] / max_p) * 40
-inst_df["marker_size"] = inst_df["marker_size"].clip(lower=3)
-
-# ── Build one trace per region ────────────────────────────────────────────────
-print("Building map …")
-
-fig = go.Figure()
-
-region_order = ["Latin America", "North America", "Europe",
-                "Asia-Pacific", "Middle East & N. Africa",
-                "Sub-Saharan Africa", "Other"]
-
-for region in region_order:
-    sub = inst_df[inst_df["region"] == region]
-    if sub.empty:
-        continue
-
-    color = REGION_COLORS[region]
-
-    fig.add_trace(go.Scattergeo(
-        lat=sub["lat"],
-        lon=sub["lon"],
-        mode="markers",
-        name=region,
-        marker=dict(
-            size=sub["marker_size"],
-            color=color,
-            opacity=0.75,
-            line=dict(width=0.4, color="white"),
-            sizemode="diameter",
-        ),
-        text=sub.apply(
-            lambda r: (
-                f"<b>{r['institution']}</b><br>"
-                f"{r['country']}  ·  {r['region']}<br>"
-                f"Papers: {r['papers']:,}   Citations: {r['citations']:,}"
-            ), axis=1
-        ),
-        hoverinfo="text",
-        showlegend=True,
-    ))
-
-# ── Labels: one per geographic cluster — hand-picked for clarity ─────────────
 LABEL_INSTS = {
-    # institution name                          label text        lat_offset
-    "Universidade de São Paulo":               ("USP",            0.0),
-    "Harvard University":                      ("Harvard",        0.0),
-    "Deakin University":                       ("Deakin",         0.0),
-    "Inserm":                                  ("Inserm",         0.0),
-    "Instituto de Salud Carlos III":           ("ISCIII",         0.0),
-    "Imperial College London":                 ("Imperial",       0.0),
-    "Universidade Federal do Rio Grande do Sul": ("UFRGS",        0.0),
-    "University of North Carolina at Chapel Hill": ("UNC",        0.0),
-    "Universidade Federal de Minas Gerais":    ("UFMG",           0.0),
-    "Wageningen University & Research":        ("Wageningen",     0.0),
+    "Universidade de São Paulo":                  ("USP",       0.0),
+    "Harvard University":                         ("Harvard",   0.0),
+    "Deakin University":                          ("Deakin",    0.0),
+    "Inserm":                                     ("Inserm",    0.0),
+    "Instituto de Salud Carlos III":              ("ISCIII",    0.0),
+    "Imperial College London":                    ("Imperial",  0.0),
+    "Universidade Federal do Rio Grande do Sul":  ("UFRGS",     0.0),
+    "University of North Carolina at Chapel Hill":("UNC",       0.0),
+    "Universidade Federal de Minas Gerais":       ("UFMG",      0.0),
+    "Wageningen University & Research":           ("Wageningen",0.0),
 }
 
-label_rows = inst_df[inst_df["institution"].isin(LABEL_INSTS)].copy()
-label_rows["label_text"] = label_rows["institution"].map(
-    {k: v[0] for k, v in LABEL_INSTS.items()}
-)
-
-fig.add_trace(go.Scattergeo(
-    lat=label_rows["lat"],
-    lon=label_rows["lon"],
-    mode="text",
-    text=label_rows["label_text"],
-    textfont=dict(size=10.5, color="#1a2742", family="Arial"),
-    textposition="top right",
-    hoverinfo="none",
-    showlegend=False,
-    name="",
-))
-
-# ── Layout ────────────────────────────────────────────────────────────────────
-fig.update_layout(
-    title=dict(
-        text=(
-            "<b>Global UPF Research Landscape</b><br>"
-            "<sup style='font-size:13px;color:#666'>Circles show research institutions — "
-            "size proportional to publications · colour by region</sup>"
-        ),
-        x=0.5, xanchor="center",
-        y=0.97, yanchor="top",
-        font=dict(size=22, color="#1a2742", family="Arial"),
-    ),
-    geo=dict(
-        projection_type="natural earth",
-        showland=True,        landcolor="#f0f2f0",
-        showocean=True,       oceancolor="#d6e8f5",
-        showlakes=False,
-        showcountries=True,   countrycolor="#c8cfd0",
-        showcoastlines=True,  coastlinecolor="#b0bcc0",
-        showframe=False,
-        bgcolor="white",
-    ),
-    legend=dict(
-        title=dict(text="Region", font=dict(size=12, color="#1a2742")),
-        x=0.01, y=0.99,
-        xanchor="left", yanchor="top",
-        bgcolor="rgba(255,255,255,0.88)",
-        bordercolor="#ddd",
-        borderwidth=1,
-        font=dict(size=11),
-        itemsizing="constant",
-    ),
-    paper_bgcolor="white",
-    margin=dict(l=0, r=0, t=70, b=10),
-    height=680,
-)
-
-# ── Top institutions table (bottom-right) ─────────────────────────────────────
-top8 = inst_df.nlargest(8, "papers")
-SHORT = {
+SHORT_NAMES = {
     "Universidade de São Paulo":                "Univ. São Paulo (USP)",
     "Universidade Federal de Minas Gerais":     "UFMG",
     "Harvard University":                       "Harvard",
@@ -370,43 +238,164 @@ SHORT = {
     "University of North Carolina at Chapel Hill": "UNC Chapel Hill",
     "Inserm":                                   "Inserm (France)",
 }
-callout_lines = ["<b>Top institutions</b>"]
-for rank, (_, r) in enumerate(top8.iterrows(), 1):
-    name = SHORT.get(r["institution"], r["institution"][:30])
-    callout_lines.append(f"<b>{rank}.</b> {name}  —  {r['papers']:,}")
 
-fig.add_annotation(
-    text="<br>".join(callout_lines),
-    x=0.99, y=0.01, xref="paper", yref="paper",
-    xanchor="right", yanchor="bottom",
-    showarrow=False,
-    font=dict(size=10.5, color="#1a2742", family="Arial"),
-    bgcolor="rgba(255,255,255,0.92)",
-    bordercolor="#cccccc",
-    borderwidth=1,
-    align="left",
-)
 
-# ── Write outputs ──────────────────────────────────────────────────────────────
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    args = parser.parse_args()
+    out = args.output_dir
 
-# Interactive HTML
-html_path = os.path.join(OUTPUT_DIR, _pf("world_map.html"))
-fig.write_html(
-    html_path,
-    include_plotlyjs="cdn",
-    config={"displayModeBar": True, "responsive": True,
-            "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-    full_html=True,
-)
-print(f"HTML → {html_path}  ({os.path.getsize(html_path)//1024} KB)")
+    print("Loading data …")
+    inst_df = pd.read_csv(os.path.join(out, _pf("papers_by_institution.csv")))
+    inst_df = inst_df[inst_df["institution"].notna() & (inst_df["institution"] != "")]
+    inst_df = inst_df[inst_df["country"].notna() & (inst_df["country"] != "")]
 
-# Static PNG for Substack
-png_path = os.path.join(OUTPUT_DIR, _pf("world_map.png"))
-try:
-    pio.write_image(fig, png_path, width=1600, height=900, scale=2)
-    print(f"PNG  → {png_path}  ({os.path.getsize(png_path)//1024} KB)")
-except Exception as e:
-    print(f"PNG export skipped: {e}")
+    def resolve_coords(row):
+        coords = INST_COORDS.get(row["institution"])
+        if coords:
+            return coords
+        return COUNTRY_CENTROIDS.get(row["country"], (None, None))
 
-print("\nDone.  Drop world_map.png into Substack, or embed world_map.html via iframe.")
+    inst_df[["lat", "lon"]] = inst_df.apply(
+        lambda r: pd.Series(resolve_coords(r)), axis=1
+    )
+    inst_df = inst_df[inst_df["lat"].notna()]
+
+    rng = np.random.default_rng(42)
+    inst_df = inst_df.copy()
+    inst_df["lat"] = inst_df["lat"] + rng.uniform(-0.08, 0.08, len(inst_df))
+    inst_df["lon"] = inst_df["lon"] + rng.uniform(-0.12, 0.12, len(inst_df))
+    inst_df["region"] = inst_df["country"].map(region_of)
+
+    max_p = inst_df["papers"].max()
+    inst_df["marker_size"] = (np.sqrt(inst_df["papers"] / max_p) * 40).clip(lower=3)
+
+    print("Building map …")
+    fig = go.Figure()
+
+    region_order = ["Latin America", "North America", "Europe",
+                    "Asia-Pacific", "Middle East & N. Africa",
+                    "Sub-Saharan Africa", "Other"]
+
+    for region in region_order:
+        sub = inst_df[inst_df["region"] == region]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scattergeo(
+            lat=sub["lat"],
+            lon=sub["lon"],
+            mode="markers",
+            name=region,
+            marker=dict(
+                size=sub["marker_size"],
+                color=REGION_COLORS[region],
+                opacity=0.75,
+                line=dict(width=0.4, color="white"),
+                sizemode="diameter",
+            ),
+            text=sub.apply(
+                lambda r: (
+                    f"<b>{r['institution']}</b><br>"
+                    f"{r['country']}  ·  {r['region']}<br>"
+                    f"Papers: {r['papers']:,}   Citations: {r['citations']:,}"
+                ), axis=1
+            ),
+            hoverinfo="text",
+            showlegend=True,
+        ))
+
+    label_rows = inst_df[inst_df["institution"].isin(LABEL_INSTS)].copy()
+    label_rows["label_text"] = label_rows["institution"].map(
+        {k: v[0] for k, v in LABEL_INSTS.items()}
+    )
+    fig.add_trace(go.Scattergeo(
+        lat=label_rows["lat"],
+        lon=label_rows["lon"],
+        mode="text",
+        text=label_rows["label_text"],
+        textfont=dict(size=10.5, color="#1a2742", family="Arial"),
+        textposition="top right",
+        hoverinfo="none",
+        showlegend=False,
+        name="",
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"<b>Global {_TITLE} Landscape</b><br>"
+                "<sup style='font-size:13px;color:#666'>Circles show research institutions — "
+                "size proportional to publications · colour by region</sup>"
+            ),
+            x=0.5, xanchor="center",
+            y=0.97, yanchor="top",
+            font=dict(size=22, color="#1a2742", family="Arial"),
+        ),
+        geo=dict(
+            projection_type="natural earth",
+            showland=True,        landcolor="#f0f2f0",
+            showocean=True,       oceancolor="#d6e8f5",
+            showlakes=False,
+            showcountries=True,   countrycolor="#c8cfd0",
+            showcoastlines=True,  coastlinecolor="#b0bcc0",
+            showframe=False,
+            bgcolor="white",
+        ),
+        legend=dict(
+            title=dict(text="Region", font=dict(size=12, color="#1a2742")),
+            x=0.01, y=0.99,
+            xanchor="left", yanchor="top",
+            bgcolor="rgba(255,255,255,0.88)",
+            bordercolor="#ddd",
+            borderwidth=1,
+            font=dict(size=11),
+            itemsizing="constant",
+        ),
+        paper_bgcolor="white",
+        margin=dict(l=0, r=0, t=70, b=10),
+        height=680,
+    )
+
+    top8 = inst_df.nlargest(8, "papers")
+    callout_lines = ["<b>Top institutions</b>"]
+    for rank, (_, r) in enumerate(top8.iterrows(), 1):
+        name = SHORT_NAMES.get(r["institution"], r["institution"][:30])
+        callout_lines.append(f"<b>{rank}.</b> {name}  —  {r['papers']:,}")
+
+    fig.add_annotation(
+        text="<br>".join(callout_lines),
+        x=0.99, y=0.01, xref="paper", yref="paper",
+        xanchor="right", yanchor="bottom",
+        showarrow=False,
+        font=dict(size=10.5, color="#1a2742", family="Arial"),
+        bgcolor="rgba(255,255,255,0.92)",
+        bordercolor="#cccccc",
+        borderwidth=1,
+        align="left",
+    )
+
+    os.makedirs(out, exist_ok=True)
+
+    html_path = os.path.join(out, _pf("world_map.html"))
+    fig.write_html(
+        html_path,
+        include_plotlyjs="cdn",
+        config={"displayModeBar": True, "responsive": True,
+                "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
+        full_html=True,
+    )
+    print(f"HTML → {html_path}  ({os.path.getsize(html_path)//1024} KB)")
+
+    png_path = os.path.join(out, _pf("world_map.png"))
+    try:
+        pio.write_image(fig, png_path, width=1600, height=900, scale=2)
+        print(f"PNG  → {png_path}  ({os.path.getsize(png_path)//1024} KB)")
+    except Exception as e:
+        print(f"PNG export skipped: {e}")
+
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

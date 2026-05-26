@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """
 make_journal_dashboard.py
-Standalone HTML dashboard: where is UPF research published and what type?
+Standalone HTML dashboard: where is research published and what type?
 
 Reads:
-  output/papers_by_journal.csv
-  output/papers_by_journal_year.csv
-  output/papers_by_journal_study_type.csv
-  output/papers_by_cohort.csv          (optional)
+  output/<prefix>_papers_by_journal.csv
+  output/<prefix>_papers_by_journal_year.csv
+  output/<prefix>_papers_by_journal_study_type.csv
 
 Writes:
-  output/journal_dashboard.html
+  output/<prefix>_journal_dashboard.html
 """
 
+import argparse
 import json as _json
 import os
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 OUTPUT_DIR  = "output"
 
@@ -33,12 +32,10 @@ _PREFIX = _CFG.get("prefix", "")
 _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
-    """Apply topic prefix to a filename."""
     return f"{_PREFIX}_{name}" if _PREFIX else name
 
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf("journal_dashboard.html"))
-TOP_N       = 25   # journals shown in most charts
-TOP_TREND   = 10   # journals in the temporal trend chart
+TOP_N       = 25
+TOP_TREND   = 10
 
 STUDY_COLORS = {
     "Observational":                    "#27ae60",
@@ -58,26 +55,16 @@ DISCLAIMER = (
     '<a href="https://openalex.org" style="color:#4a3800;font-weight:600" '
     'target="_blank">OpenAlex</a>. '
     "Does not represent the views of any individual, institution, or organisation. "
-    "Study-type and cohort labels are algorithmically assigned and may contain errors."
+    "Study-type labels are algorithmically assigned and may contain errors."
     "</div>"
 )
 
-print("Loading data…")
-j_df   = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal.csv")))
-jy_df  = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal_year.csv")))
-jst_df = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_journal_study_type.csv")))
-
-# ── Filter non-journals (preprint servers, repositories, aggregators) ─────────
-# OpenAlex records these as primary sources but they are not peer-reviewed journals.
 _NON_JOURNALS = {
-    # Preprint servers
     "biorxiv", "medrxiv", "ssrn electronic journal", "research square",
     "authorea", "chemrxiv", "preprints.org", "arxiv",
-    # Data / institutional repositories
     "figshare", "zenodo", "dryad", "osf preprints",
-    "la referencia",      # Latin-American institutional repo aggregator
+    "la referencia",
     "hal open science",
-    # Generic
     "unknown",
 }
 
@@ -87,16 +74,7 @@ def _is_non_journal(name):
     n = name.lower()
     return any(nj in n for nj in _NON_JOURNALS)
 
-j_df   = j_df[~j_df["journal"].apply(_is_non_journal)].copy()
-jy_df  = jy_df[~jy_df["journal"].apply(_is_non_journal)].copy()
-jst_df = jst_df[~jst_df["journal"].apply(_is_non_journal)].copy()
 
-# ── Derived columns ───────────────────────────────────────────────────────────
-j_df = j_df[j_df["journal"].notna() & (j_df["journal"] != "Unknown")]
-j_df["cites_per_paper"] = (j_df["citations"] / j_df["papers"]).round(1)
-top_journals = j_df.nlargest(TOP_N, "papers")["journal"].tolist()
-
-# ── Figure 1: top journals by paper count (horizontal bar) ───────────────────
 def fig_top_journals(df, n=TOP_N):
     d = df.nlargest(n, "papers").sort_values("papers")
     fig = go.Figure(go.Bar(
@@ -111,15 +89,13 @@ def fig_top_journals(df, n=TOP_N):
         xaxis_title="Papers", yaxis_title="",
         height=max(500, n * 22),
         margin=dict(l=10, r=80, t=50, b=40),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="white", paper_bgcolor="white",
         yaxis=dict(tickfont=dict(size=11)),
     )
     fig.update_xaxes(showgrid=True, gridcolor="#eee")
     return fig
 
 
-# ── Figure 2: citations per paper vs paper count (bubble) ────────────────────
 def fig_impact_bubble(df, n=60):
     d = df.nlargest(n, "papers")
     fig = go.Figure(go.Scatter(
@@ -138,7 +114,6 @@ def fig_impact_bubble(df, n=60):
             "Papers: %{x:,}<br>"
             "Citations / paper: %{y:.1f}<extra></extra>"
         ),
-        customdata=d["citations"],
     ))
     fig.update_layout(
         title=f"Impact vs Volume — top {n} journals",
@@ -152,17 +127,13 @@ def fig_impact_bubble(df, n=60):
     return fig
 
 
-# ── Figure 3: study type breakdown by top journals (100% stacked bar) ─────────
 def fig_study_type_by_journal(jst_df, top_list):
     d = jst_df[jst_df["journal"].isin(top_list)].copy()
     totals = d.groupby("journal")["papers"].sum().reset_index(name="total")
     d = d.merge(totals, on="journal")
     d["pct"] = 100 * d["papers"] / d["total"]
-
-    # Order journals by total papers (descending for readability)
     order = (d.groupby("journal")["total"].first()
               .sort_values(ascending=True).index.tolist())
-
     fig = go.Figure()
     for st, color in STUDY_COLORS.items():
         sub = d[d["study_type"] == st]
@@ -174,7 +145,6 @@ def fig_study_type_by_journal(jst_df, top_list):
             marker_color=color,
             hovertemplate=f"<b>{st}</b><br>%{{y}}: %{{x:.1f}}%<extra></extra>",
         ))
-
     fig.update_layout(
         title=f"Study-type mix — top {len(top_list)} journals (% of papers)",
         barmode="stack",
@@ -190,13 +160,10 @@ def fig_study_type_by_journal(jst_df, top_list):
     return fig
 
 
-# ── Figure 4: temporal trends — top journals (line chart) ───────────────────
 def fig_journal_trends(jy_df, top_list, n=TOP_TREND):
-    # Pick the n journals from top_list with most recent-year activity
     recent = (jy_df[jy_df["journal"].isin(top_list)]
               .groupby("journal")["papers"].sum()
               .nlargest(n).index.tolist())
-
     fig = go.Figure()
     d = jy_df[jy_df["journal"].isin(recent)]
     d = d[(d["year"] >= 2013) & (d["year"] <= 2025)]
@@ -220,34 +187,49 @@ def fig_journal_trends(jy_df, top_list, n=TOP_TREND):
     return fig
 
 
-# ── Assemble HTML ─────────────────────────────────────────────────────────────
-print("Building figures…")
-PLOTLY_CDN = "https://cdn.plot.ly/plotly-3.5.0.min.js"
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    args = parser.parse_args()
+    out = args.output_dir
 
-figs = {
-    "Top journals by papers":        fig_top_journals(j_df),
-    "Impact vs volume":              fig_impact_bubble(j_df),
-    "Study-type mix by journal":     fig_study_type_by_journal(jst_df, top_journals),
-    "Publication trends":            fig_journal_trends(jy_df, top_journals),
-}
-# Convert to div strings
-fig_divs = {
-    title: fig.to_html(full_html=False, include_plotlyjs=False,
-                       config={"responsive": True})
-    for title, fig in figs.items()
-}
+    print("Loading data…")
+    j_df   = pd.read_csv(os.path.join(out, _pf("papers_by_journal.csv")))
+    jy_df  = pd.read_csv(os.path.join(out, _pf("papers_by_journal_year.csv")))
+    jst_df = pd.read_csv(os.path.join(out, _pf("papers_by_journal_study_type.csv")))
 
-sections = "\n".join(
-    f'<h2 class="sec">{t}</h2>\n<div class="fig-wrap">{d}</div>'
-    for t, d in fig_divs.items()
-)
+    j_df   = j_df[~j_df["journal"].apply(_is_non_journal)].copy()
+    jy_df  = jy_df[~jy_df["journal"].apply(_is_non_journal)].copy()
+    jst_df = jst_df[~jst_df["journal"].apply(_is_non_journal)].copy()
 
-html = f"""<!DOCTYPE html>
+    j_df = j_df[j_df["journal"].notna() & (j_df["journal"] != "Unknown")]
+    j_df["cites_per_paper"] = (j_df["citations"] / j_df["papers"]).round(1)
+    top_journals = j_df.nlargest(TOP_N, "papers")["journal"].tolist()
+
+    print("Building figures…")
+    PLOTLY_CDN = "https://cdn.plot.ly/plotly-3.5.0.min.js"
+    figs = {
+        "Top journals by papers":    fig_top_journals(j_df),
+        "Impact vs volume":          fig_impact_bubble(j_df),
+        "Study-type mix by journal": fig_study_type_by_journal(jst_df, top_journals),
+        "Publication trends":        fig_journal_trends(jy_df, top_journals),
+    }
+    fig_divs = {
+        title: fig.to_html(full_html=False, include_plotlyjs=False,
+                           config={"responsive": True})
+        for title, fig in figs.items()
+    }
+    sections = "\n".join(
+        f'<h2 class="sec">{t}</h2>\n<div class="fig-wrap">{d}</div>'
+        for t, d in fig_divs.items()
+    )
+
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UPF Bibliometrics — Journal Analysis</title>
+<title>{_TITLE} — Journal Analysis</title>
 <script src="{PLOTLY_CDN}" charset="utf-8"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -270,25 +252,30 @@ a{{color:inherit}}
 <body>
 {DISCLAIMER}
 <div id="hdr">
-  <h1>UPF Research — Journal Analysis</h1>
-  <p>Where is UPF research published, and what type of research appears where?</p>
+  <h1>{_TITLE} — Journal Analysis</h1>
+  <p>Where is this research published, and what type of research appears where?</p>
 </div>
 <main>
 {sections}
+  <p style="font-size:.82rem;color:#888;margin-top:24px">
+    ← <a href="index.html" style="color:#2980b9">Back to overview</a>
+  </p>
 </main>
 <footer>Data: <a href="https://openalex.org">OpenAlex</a> · Analysis by G. Kuhnle · Generated {pd.Timestamp.now().strftime("%B %Y")}</footer>
 </body>
 </html>
 """
 
-with open(OUTPUT_FILE, "w", encoding="utf-8") as fh:
-    fh.write(html)
+    output_file = os.path.join(out, _pf("journal_dashboard.html"))
+    os.makedirs(out, exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print(f"Written: {output_file}  ({os.path.getsize(output_file)//1024} KB)")
 
-size_kb = os.path.getsize(OUTPUT_FILE) // 1024
-print(f"Written: {OUTPUT_FILE}  ({size_kb} KB)")
+    print(f"\nTop 10 journals by papers:")
+    for _, r in j_df.nlargest(10, "papers").iterrows():
+        print(f"  {r['papers']:>5}  {r['cites_per_paper']:>6.1f} cit/paper  {r['journal']}")
 
-# Quick summary to stdout
-print(f"\nTop 10 journals by papers:")
-for _, r in j_df.nlargest(10, "papers").iterrows():
-    print(f"  {r['papers']:>5}  {r['cites_per_paper']:>6.1f} cit/paper  {r['journal']}")
 
+if __name__ == "__main__":
+    main()

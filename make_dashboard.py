@@ -919,16 +919,21 @@ EXPLANATIONS = {
         "Toggle between metrics using the buttons above the chart."
     ),
     "Degree Distribution": (
-        "Shows how many co-authors each researcher has (linear and log–log scales)."
+        "<b>Degree</b> = number of distinct co-authors a researcher has in this literature. "
+        "<b>Count</b> = number of researchers with that many co-authors. "
+        "Most authors collaborate with only a few others (low degree); a small number are highly connected hubs (high degree). "
+        "The log–log panel reveals whether the distribution follows a power law, which is typical of real collaboration networks."
     ),
     "Co-authorship Network": (
-        "Each node is an author; edges connect co-authors. "
-        "<b>Colour</b> = Louvain community; <b>size</b> = degree. "
+        "Each node is an author; an edge connects two authors who share at least one paper. "
+        "<b>Degree</b> (node size) = number of distinct co-authors. "
+        "<b>Colour</b> = Louvain community (research cluster detected by modularity optimisation). "
         "Click a community in the legend to isolate it."
     ),
     "Degree vs Betweenness Centrality": (
-        "<b>X</b> = degree (number of co-authors). "
-        "<b>Y</b> = betweenness (how often an author lies on shortest paths between others)."
+        "<b>Degree</b> (x-axis) = number of distinct co-authors — a measure of direct connectivity. "
+        "<b>Betweenness centrality</b> (y-axis) = fraction of shortest paths between all other author pairs that pass through this author — a measure of brokerage between research groups. "
+        "Point size reflects total papers; colour reflects community."
     ),
     "Country Collaboration Heatmap": (
         "Co-authored papers between top country pairs. Darker = more collaboration."
@@ -1373,15 +1378,25 @@ def main():
     out  = args.output_dir
 
     if args.fetch:
-        script = os.path.join(os.path.dirname(__file__), "bibliometrics.py")
-        print(f"Fetching data via {script} …")
-        result = subprocess.run(
-            [sys.executable, script, "--output-dir", out],
-            check=False,
-        )
-        if result.returncode != 0:
-            print("bibliometrics script exited with errors — aborting dashboard build.")
-            sys.exit(result.returncode)
+        here = os.path.dirname(__file__)
+        steps = [
+            ("bibliometrics.py",              "Fetching data"),
+            ("make_world_map.py",             "Building world map"),
+            ("make_interactive_network.py",   "Building interactive network"),
+            ("make_study_type_dashboard.py",  "Building study-type dashboard"),
+            ("make_study_type_network.py",    "Building study-type network"),
+            ("make_journal_dashboard.py",     "Building journal dashboard"),
+        ]
+        for script_name, label in steps:
+            script = os.path.join(here, script_name)
+            print(f"{label} ({script_name}) …")
+            result = subprocess.run(
+                [sys.executable, script, "--output-dir", out],
+                check=False,
+            )
+            if result.returncode != 0:
+                print(f"{script_name} exited with errors — continuing.")
+
 
     (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
      dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
