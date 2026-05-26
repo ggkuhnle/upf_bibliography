@@ -334,126 +334,89 @@ def fig_author_position(authors_df):
         authors_df["author_name"].notna() & (authors_df["author_name"] != "")
     ].copy()
 
-    # Ensure position columns exist (graceful fallback for old CSVs)
     for col in ("first_author_papers", "last_author_papers", "middle_author_papers", "middle_author_rate"):
         if col not in clean.columns:
             clean[col] = 0
 
-    # ── Sub-chart 1: stacked bar top-25 authors by total papers ──────────────
-    top25 = clean.nlargest(25, "papers").sort_values("papers")
+    top25      = clean.nlargest(25, "papers").sort_values("papers")
+    top_first  = clean.nlargest(20, "first_author_papers").sort_values("first_author_papers")
+    top_last   = clean.nlargest(20, "last_author_papers").sort_values("last_author_papers")
+    scat       = clean[clean["papers"] >= 5].copy()
+
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=[
-            "Author Position Breakdown (top 25 by papers)",
-            "First vs Last Author Share (top 25)",
-            "Resource-Author Scatter  (all ≥5 papers)",
-            "Top 20 First-Authors vs Top 20 Last-Authors",
+            "Position breakdown — top 25 authors by total papers",
+            "Middle-author rate vs total papers (≥5 papers)",
+            "Top 20 first authors",
+            "Top 20 last authors",
         ],
-        vertical_spacing=0.16,
-        horizontal_spacing=0.10,
+        vertical_spacing=0.14,
+        horizontal_spacing=0.12,
+        row_heights=[0.55, 0.45],
     )
 
-    # Row 1 left — stacked bar: first / last / middle
+    # Row 1 left — stacked bar first / last / middle
     for col, name, color in [
         ("first_author_papers",  "First",  "#2980b9"),
         ("last_author_papers",   "Last",   "#27ae60"),
         ("middle_author_papers", "Middle", "#e67e22"),
     ]:
-        fig.add_trace(
-            go.Bar(
-                x=top25[col], y=top25["author_name"],
-                name=name, orientation="h",
-                marker_color=color,
-                hovertemplate=f"<b>%{{y}}</b><br>{name}: %{{x}}<extra></extra>",
-            ),
-            row=1, col=1,
-        )
+        fig.add_trace(go.Bar(
+            x=top25[col], y=top25["author_name"],
+            name=name, orientation="h", marker_color=color,
+            hovertemplate=f"<b>%{{y}}</b><br>{name}: %{{x}}<extra></extra>",
+        ), row=1, col=1)
 
-    # Row 1 right — 100% stacked (proportion)
-    tot = top25["papers"].replace(0, 1)
-    for col, name, color in [
-        ("first_author_papers",  "First",  "#2980b9"),
-        ("last_author_papers",   "Last",   "#27ae60"),
-        ("middle_author_papers", "Middle", "#e67e22"),
-    ]:
-        fig.add_trace(
-            go.Bar(
-                x=top25[col] / tot * 100, y=top25["author_name"],
-                name=name, orientation="h",
-                marker_color=color, showlegend=False,
-                hovertemplate="<b>%{y}</b><br>" + name + ": %{x:.1f}%<extra></extra>",
-            ),
-            row=1, col=2,
-        )
-
-    # Row 2 left — scatter: total papers vs middle_author_rate
-    scat = clean[clean["papers"] >= 5].copy()
-    scat_label = scat.apply(
-        lambda r: f"{r['author_name']}<br>Papers: {int(r['papers'])}<br>"
-                  f"Middle rate: {r['middle_author_rate']:.2f}", axis=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=scat["papers"], y=scat["middle_author_rate"],
-            mode="markers",
-            marker=dict(
-                size=6,
-                color=scat["middle_author_rate"],
-                colorscale="RdYlGn_r",
-                showscale=True,
-                colorbar=dict(title="Middle rate", x=0.46, len=0.45),
-                opacity=0.7,
-            ),
-            text=scat_label, hoverinfo="text",
-            showlegend=False,
+    # Row 1 right — scatter: total papers vs middle_author_rate
+    fig.add_trace(go.Scatter(
+        x=scat["papers"], y=scat["middle_author_rate"],
+        mode="markers",
+        marker=dict(
+            size=6,
+            color=scat["middle_author_rate"],
+            colorscale="RdYlGn_r",
+            showscale=True,
+            colorbar=dict(title="Middle rate", thickness=12, len=0.45, x=1.01),
+            opacity=0.75,
         ),
-        row=2, col=1,
-    )
-    # Threshold line at 0.7 middle rate
+        text=scat.apply(
+            lambda r: f"<b>{r['author_name']}</b><br>Papers: {int(r['papers'])}<br>"
+                      f"Middle rate: {r['middle_author_rate']:.2f}", axis=1),
+        hoverinfo="text",
+        showlegend=False,
+    ), row=1, col=2)
     fig.add_hline(y=0.70, line_dash="dot", line_color="red",
-                  annotation_text="Middle rate 0.70", annotation_position="top right",
-                  row=2, col=1)
+                  annotation_text="0.70", annotation_position="top right",
+                  row=1, col=2)
 
-    # Row 2 right — top-20 first vs top-20 last (side-by-side)
-    top_first = clean.nlargest(20, "first_author_papers").sort_values("first_author_papers")
-    top_last  = clean.nlargest(20, "last_author_papers").sort_values("last_author_papers")
-    fig.add_trace(
-        go.Bar(x=top_first["first_author_papers"], y=top_first["author_name"],
-               orientation="h", name="First author",
-               marker_color="#2980b9", showlegend=False,
-               hovertemplate="<b>%{y}</b><br>First-author papers: %{x}<extra></extra>"),
-        row=2, col=2,
-    )
-    fig.add_trace(
-        go.Bar(x=top_last["last_author_papers"], y=top_last["author_name"],
-               orientation="h", name="Last author",
-               marker_color="#27ae60", showlegend=False,
-               hovertemplate="<b>%{y}</b><br>Last-author papers: %{x}<extra></extra>"),
-        row=2, col=2,
-    )
+    # Row 2 left — top-20 first authors
+    fig.add_trace(go.Bar(
+        x=top_first["first_author_papers"], y=top_first["author_name"],
+        orientation="h", marker_color="#2980b9", showlegend=False,
+        hovertemplate="<b>%{y}</b><br>First-author papers: %{x}<extra></extra>",
+    ), row=2, col=1)
+
+    # Row 2 right — top-20 last authors
+    fig.add_trace(go.Bar(
+        x=top_last["last_author_papers"], y=top_last["author_name"],
+        orientation="h", marker_color="#27ae60", showlegend=False,
+        hovertemplate="<b>%{y}</b><br>Last-author papers: %{x}<extra></extra>",
+    ), row=2, col=2)
 
     fig.update_layout(
         barmode="stack",
-        height=1100,
+        height=1150,
         title_text="Author Position Analysis",
-        legend=dict(orientation="h", x=0, y=1.04),
-        margin=dict(l=10, r=20, t=100, b=40),
-        updatemenus=[dict(
-            type="buttons", direction="right",
-            x=0.52, xanchor="left", y=1.04, yanchor="top",
-            buttons=[
-                dict(label="Top First", method="update",
-                     args=[{"visible": [False]*3 + [False]*3 + [True, False] + [True, False]}]),
-                dict(label="Top Last", method="update",
-                     args=[{"visible": [False]*3 + [False]*3 + [True, False] + [False, True]}]),
-            ],
-        )],
+        legend=dict(orientation="h", x=0.0, xanchor="left",
+                    y=1.02, yanchor="bottom", bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=10, r=60, t=80, b=40),
     )
     fig.update_xaxes(title_text="Papers", row=1, col=1)
-    fig.update_xaxes(title_text="% of papers", row=1, col=2)
-    fig.update_xaxes(title_text="Total papers", type="log", row=2, col=1)
-    fig.update_yaxes(title_text="Middle-author rate", row=2, col=1)
-    fig.update_xaxes(title_text="Papers", row=2, col=2)
+    fig.update_xaxes(title_text="Total papers (log scale)", type="log", row=1, col=2)
+    fig.update_yaxes(title_text="Middle-author rate", row=1, col=2)
+    fig.update_xaxes(title_text="First-author papers", row=2, col=1)
+    fig.update_xaxes(title_text="Last-author papers", row=2, col=2)
     return fig
 
 
