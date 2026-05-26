@@ -113,7 +113,7 @@ def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool =
             "select": (
                 "id,doi,title,publication_year,"
                 "cited_by_count,authorships,funders,awards,"
-                "type,mesh"
+                "type,mesh,primary_location"
             ),
         }
 
@@ -177,66 +177,60 @@ def flatten_works(works: list[dict]) -> list[dict]:
     Explode each work into one row per (work × authorship × institution).
     A single paper may produce multiple rows if it has multiple authors or
     an author affiliated with multiple institutions.
+    Includes author_position ("first"/"middle"/"last") and journal_name per row.
     """
     rows = []
     for work in works:
-        work_id = work.get("id", "")
-        title = (work.get("title") or "").strip()
-        year = work.get("publication_year")
-        doi = work.get("doi") or ""
+        work_id  = work.get("id", "")
+        title    = (work.get("title") or "").strip()
+        year     = work.get("publication_year")
+        doi      = work.get("doi") or ""
         citations = work.get("cited_by_count", 0)
+
+        # Journal / venue info (work-level, same for every authorship row)
+        loc = work.get("primary_location") or {}
+        src = loc.get("source") or {}
+        journal_name = (src.get("display_name") or "").strip()
+        journal_id   = src.get("id") or ""
 
         authorships = work.get("authorships") or []
         if not authorships:
-            # Keep the work with empty author fields so it still counts.
             rows.append({
-                "work_id": work_id,
-                "title": title,
-                "year": year,
-                "doi": doi,
-                "citations": citations,
-                "author_name": "",
-                "author_id": "",
-                "institution": "",
-                "country": "",
+                "work_id": work_id, "title": title, "year": year,
+                "doi": doi, "citations": citations,
+                "author_name": "", "author_id": "",
+                "author_position": "",
+                "institution": "", "country": "",
+                "journal_name": journal_name, "journal_id": journal_id,
             })
             continue
 
         for authorship in authorships:
-            author = authorship.get("author") or {}
+            author   = authorship.get("author") or {}
             author_name = author.get("display_name", "")
-            author_id = author.get("id", "")
-            department = extract_department(
+            author_id   = author.get("id", "")
+            author_pos  = authorship.get("author_position", "middle") or "middle"
+            department  = extract_department(
                 authorship.get("raw_affiliation_strings") or []
             )
 
             institutions = authorship.get("institutions") or []
+            base = {
+                "work_id": work_id, "title": title, "year": year,
+                "doi": doi, "citations": citations,
+                "author_name": author_name, "author_id": author_id,
+                "author_position": author_pos,
+                "department": department,
+                "journal_name": journal_name, "journal_id": journal_id,
+            }
             if not institutions:
-                rows.append({
-                    "work_id": work_id,
-                    "title": title,
-                    "year": year,
-                    "doi": doi,
-                    "citations": citations,
-                    "author_name": author_name,
-                    "author_id": author_id,
-                    "institution": "",
-                    "department": department,
-                    "country": "",
-                })
+                rows.append({**base, "institution": "", "country": ""})
             else:
                 for inst in institutions:
                     rows.append({
-                        "work_id": work_id,
-                        "title": title,
-                        "year": year,
-                        "doi": doi,
-                        "citations": citations,
-                        "author_name": author_name,
-                        "author_id": author_id,
+                        **base,
                         "institution": inst.get("display_name", ""),
-                        "department": department,
-                        "country": inst.get("country_code", ""),
+                        "country":     inst.get("country_code", ""),
                     })
     return rows
 
@@ -293,27 +287,38 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
         if key not in seen:
             seen[key] = {
                 "author_name": r["author_name"],
-                "institution": r["institution"],
-                "country": r["country"],
-                "citations": r["citations"],
+                "institution":  r["institution"],
+                "country":      r["country"],
+                "citations":    r["citations"],
+                "position":     r.get("author_position", "middle") or "middle",
             }
 
-    counter: dict[str, dict] = collections.defaultdict(
-        lambda: {"author_name": "", "institution": "", "country": "", "papers": 0, "citations": 0}
-    )
+    counter: dict[str, dict] = collections.defaultdict(lambda: {
+        "author_name": "", "institution": "", "country": "",
+        "papers": 0, "citations": 0,
+        "first_author_papers": 0, "last_author_papers": 0, "middle_author_papers": 0,
+    })
     for (_, author_id), meta in seen.items():
         key = author_id or meta["author_name"]
         counter[key]["author_name"] = meta["author_name"]
         counter[key]["institution"] = counter[key]["institution"] or meta["institution"]
-        counter[key]["country"] = counter[key]["country"] or meta["country"]
-        counter[key]["papers"] += 1
+        counter[key]["country"]     = counter[key]["country"]     or meta["country"]
+        counter[key]["papers"]    += 1
         counter[key]["citations"] += meta["citations"]
+        pos = meta.get("position", "middle")
+        if pos == "first":
+            counter[key]["first_author_papers"]  += 1
+        elif pos == "last":
+            counter[key]["last_author_papers"]   += 1
+        else:
+            counter[key]["middle_author_papers"] += 1
 
-    return sorted(
-        [{"author_id": aid, **v} for aid, v in counter.items()],
-        key=lambda x: x["papers"],
-        reverse=True,
-    )
+    result = []
+    for aid, v in counter.items():
+        total = v["papers"] or 1
+        v["middle_author_rate"] = round(v["middle_author_papers"] / total, 3)
+        result.append({"author_id": aid, **v})
+    return sorted(result, key=lambda x: x["papers"], reverse=True)
 
 
 # ── Department aggregation ────────────────────────────────────────────────────
@@ -565,6 +570,221 @@ def papers_by_study_type_year(works: list[dict]) -> list[dict]:
         [{"year": k[0], "study_type": k[1], **v} for k, v in counter.items()],
         key=lambda x: (x["year"], x["study_type"]),
     )
+
+
+# ── Cohort detection ──────────────────────────────────────────────────────────
+
+# Patterns matched against paper titles (case-insensitive).
+# Title-only detection has ~50-60% recall for major cohorts; good enough for
+# a bibliometric signal but not for a definitive cohort membership list.
+COHORTS: dict[str, re.Pattern] = {  # type: ignore[type-arg]
+    "EPIC":              re.compile(r'\bEPIC\b|European Prospective Investigation', re.I),
+    "NutriNet-Santé":    re.compile(r'NutriNet', re.I),
+    "NHS / NHS2":        re.compile(r"Nurses.{0,6}Health Study", re.I),
+    "HPFS":              re.compile(r"Health Professionals Follow.?up", re.I),
+    "UK Biobank":        re.compile(r"UK Biobank", re.I),
+    "PREDIMED":          re.compile(r'\bPREDIMED\b', re.I),
+    "SUN":               re.compile(r'\bSUN\b.{0,20}(cohort|study)|Seguimiento Universidad de Navarra', re.I),
+    "ELSA-Brasil":       re.compile(r'ELSA.Brasil', re.I),
+    "NHANES":            re.compile(r'\bNHANES\b', re.I),
+    "WHI":               re.compile(r"Women.s Health Initiative", re.I),
+    "MESA":              re.compile(r'\bMESA\b.{0,25}(study|cohort|data)|Multi.Ethnic Study of Atherosclerosis', re.I),
+    "Rotterdam Study":   re.compile(r'Rotterdam Study', re.I),
+    "PURE":              re.compile(r'\bPURE\b.{0,25}(study|cohort)|Prospective Urban Rural Epidemiology', re.I),
+    "HUNT":              re.compile(r'\bHUNT\b.{0,25}(study|cohort|survey)', re.I),
+    "Malmö D&C":         re.compile(r'Malmö Diet and Cancer', re.I),
+    "NIH-AARP":          re.compile(r'NIH.AARP', re.I),
+    "ALSPAC":            re.compile(r'\bALSPAC\b|Avon Longitudinal Study', re.I),
+    "CARDIA":            re.compile(r'\bCARDIA\b.{0,25}(study|cohort)', re.I),
+    "ARIC":              re.compile(r'\bARIC\b.{0,25}(study|cohort)', re.I),
+    "REGARDS":           re.compile(r'\bREGARDS\b', re.I),
+    "SHARE":             re.compile(r'\bSHARE\b.{0,25}(study|survey|cohort)', re.I),
+    "ATTICA":            re.compile(r'\bATTICA\b.{0,25}(study|cohort)', re.I),
+    "ENRICA":            re.compile(r'\bENRICA\b', re.I),
+    "Generation XXI":    re.compile(r'Generation XXI|Gen XXI', re.I),
+    "ELSA (UK)":         re.compile(r'\bELSA\b.{0,30}(ageing|aging|longitudinal)', re.I),
+    "ASPREE":            re.compile(r'\bASPREE\b', re.I),
+    "CPS-II":            re.compile(r'\bCPS.?II\b|Cancer Prevention Study II', re.I),
+    "NutriNet-Brasil":   re.compile(r'NutriNet.Brasil', re.I),
+    "KNHANES":           re.compile(r'\bKNHANES\b|Korea National Health and Nutrition', re.I),
+    "CHNS":              re.compile(r'\bCHNS\b|China Health and Nutrition Survey', re.I),
+    "45 and Up":         re.compile(r'45 and Up Study', re.I),
+    "Melbourne Cohort":  re.compile(r'Melbourne Collaborative Cohort', re.I),
+    "InfAnti":           re.compile(r'\bInfAnti\b', re.I),
+    "PLCO":              re.compile(r'\bPLCO\b|Prostate.Lung.Colorectal', re.I),
+    "REGARDS":           re.compile(r'\bREGARDS\b', re.I),
+}
+
+
+def detect_cohorts(work: dict) -> list[str]:
+    """Return list of cohort names found in the paper title."""
+    title = (work.get("title") or "").strip()
+    return [name for name, pat in COHORTS.items() if pat.search(title)]
+
+
+def papers_by_cohort(works: list[dict]) -> list[dict]:
+    counter: dict[str, dict] = collections.defaultdict(
+        lambda: {"papers": 0, "citations": 0,
+                 "rct": 0, "observational": 0, "review": 0, "other": 0}
+    )
+    for work in works:
+        cohorts = detect_cohorts(work)
+        if not cohorts:
+            continue
+        cites = work.get("cited_by_count", 0)
+        st    = classify_study_type(work)
+        st_key = {
+            "RCT": "rct",
+            "Observational": "observational",
+            "Review": "review",
+            "Systematic Review / Meta-analysis": "review",
+        }.get(st, "other")
+        for cohort in cohorts:
+            counter[cohort]["papers"]    += 1
+            counter[cohort]["citations"] += cites
+            counter[cohort][st_key]      += 1
+    return sorted(
+        [{"cohort": k, **v} for k, v in counter.items()],
+        key=lambda x: x["papers"], reverse=True,
+    )
+
+
+# ── Journal aggregations ──────────────────────────────────────────────────────
+
+def _journal_name(work: dict) -> str:
+    src = (work.get("primary_location") or {}).get("source") or {}
+    return (src.get("display_name") or "").strip() or "Unknown"
+
+
+def papers_by_journal(works: list[dict]) -> list[dict]:
+    counter: dict[str, dict] = collections.defaultdict(
+        lambda: {"journal_id": "", "papers": 0, "citations": 0}
+    )
+    for work in works:
+        jname = _journal_name(work)
+        src   = (work.get("primary_location") or {}).get("source") or {}
+        jid   = src.get("id") or ""
+        counter[jname]["journal_id"] = counter[jname]["journal_id"] or jid
+        counter[jname]["papers"]    += 1
+        counter[jname]["citations"] += work.get("cited_by_count", 0)
+    return sorted(
+        [{"journal": k, **v} for k, v in counter.items()],
+        key=lambda x: x["papers"], reverse=True,
+    )
+
+
+def papers_by_journal_year(works: list[dict]) -> list[dict]:
+    counter: dict[tuple, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        year = work.get("publication_year")
+        if year is None:
+            continue
+        jname = _journal_name(work)
+        counter[(jname, year)]["papers"]    += 1
+        counter[(jname, year)]["citations"] += work.get("cited_by_count", 0)
+    return sorted(
+        [{"journal": k[0], "year": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["journal"], x["year"]),
+    )
+
+
+def papers_by_journal_study_type(works: list[dict]) -> list[dict]:
+    counter: dict[tuple, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        jname = _journal_name(work)
+        st    = classify_study_type(work)
+        counter[(jname, st)]["papers"]    += 1
+        counter[(jname, st)]["citations"] += work.get("cited_by_count", 0)
+    return sorted(
+        [{"journal": k[0], "study_type": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (-x["papers"], x["journal"]),
+    )
+
+
+# ── Primary co-authorship edges (first ↔ last author only) ───────────────────
+
+def _primary_pairs(rows: list[dict]) -> dict[str, dict]:
+    """Per-work: identify first and last author IDs (deduplicated by author_id)."""
+    work_pos: dict[str, dict] = {}
+    seen_auth: dict[tuple, bool] = {}
+    for r in rows:
+        wid = r["work_id"]
+        aid = r.get("author_id")
+        if not aid:
+            continue
+        if wid not in work_pos:
+            work_pos[wid] = {"year": r["year"], "first": None, "last": None}
+        dedup_key = (wid, aid)
+        if dedup_key in seen_auth:
+            continue
+        seen_auth[dedup_key] = True
+        pos = r.get("author_position", "middle") or "middle"
+        if pos == "first":
+            work_pos[wid]["first"] = aid
+        elif pos == "last":
+            work_pos[wid]["last"] = aid
+    return work_pos
+
+
+def primary_coauthorship_edges(rows: list[dict]) -> list[dict]:
+    """
+    Co-authorship edges restricted to the first ↔ last author pair per paper.
+    Captures the "principal contributor" relationship and filters out honorary
+    middle authors (e.g. standing cohort PI lists).
+    """
+    name_map: dict[str, dict] = {}
+    for r in rows:
+        aid = r.get("author_id")
+        if aid and aid not in name_map:
+            name_map[aid] = {
+                "name": r["author_name"],
+                "institution": r["institution"],
+                "country":     r["country"],
+            }
+
+    pair_counter: dict[tuple, dict] = {}
+    for wid, info in _primary_pairs(rows).items():
+        a1, a2 = info.get("first"), info.get("last")
+        if not a1 or not a2 or a1 == a2:
+            continue
+        key = (min(a1, a2), max(a1, a2))
+        if key not in pair_counter:
+            m1, m2 = name_map.get(a1, {}), name_map.get(a2, {})
+            pair_counter[key] = {
+                "author1_id": a1, "author1_name": m1.get("name", ""),
+                "author1_institution": m1.get("institution", ""),
+                "author1_country": m1.get("country", ""),
+                "author2_id": a2, "author2_name": m2.get("name", ""),
+                "author2_institution": m2.get("institution", ""),
+                "author2_country": m2.get("country", ""),
+                "shared_papers": 0,
+            }
+        pair_counter[key]["shared_papers"] += 1
+
+    return sorted(pair_counter.values(), key=lambda x: x["shared_papers"], reverse=True)
+
+
+def primary_coauthorship_edges_by_year(rows: list[dict]) -> list[dict]:
+    name_map: dict[str, str] = {
+        r["author_id"]: r["author_name"]
+        for r in rows if r.get("author_id")
+    }
+    pair_year: dict[tuple, int] = collections.defaultdict(int)
+    for wid, info in _primary_pairs(rows).items():
+        a1, a2 = info.get("first"), info.get("last")
+        year   = info.get("year")
+        if not a1 or not a2 or a1 == a2 or year is None:
+            continue
+        pair_year[(min(a1, a2), max(a1, a2), year)] += 1
+
+    result = []
+    for (a1, a2, year), papers in pair_year.items():
+        result.append({
+            "author1_id": a1, "author1_name": name_map.get(a1, ""),
+            "author2_id": a2, "author2_name": name_map.get(a2, ""),
+            "year": year, "papers": papers,
+        })
+    return sorted(result, key=lambda x: (x["year"], -x["papers"]))
 
 
 # ── Temporal aggregations ─────────────────────────────────────────────────────
@@ -868,7 +1088,10 @@ def main() -> None:
     )
     write_csv(
         os.path.join(out, "papers_by_author.csv"),
-        ["author_id", "author_name", "institution", "country", "papers", "citations"],
+        ["author_id", "author_name", "institution", "country",
+         "papers", "citations",
+         "first_author_papers", "last_author_papers", "middle_author_papers",
+         "middle_author_rate"],
         author_tbl,
     )
 
@@ -946,6 +1169,52 @@ def main() -> None:
             "shared_papers",
         ],
         edges,
+    )
+
+    # Primary (first ↔ last) co-authorship edges
+    primary_edges = primary_coauthorship_edges(rows)
+    write_csv(
+        os.path.join(out, "coauthorship_edges_primary.csv"),
+        [
+            "author1_id", "author1_name", "author1_institution", "author1_country",
+            "author2_id", "author2_name", "author2_institution", "author2_country",
+            "shared_papers",
+        ],
+        primary_edges,
+    )
+    primary_edges_yr = primary_coauthorship_edges_by_year(rows)
+    write_csv(
+        os.path.join(out, "coauthorship_edges_by_year_primary.csv"),
+        ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
+        primary_edges_yr,
+    )
+
+    # Cohort detection
+    cohort_tbl = papers_by_cohort(works)
+    write_csv(
+        os.path.join(out, "papers_by_cohort.csv"),
+        ["cohort", "papers", "citations", "rct", "observational", "review", "other"],
+        cohort_tbl,
+    )
+
+    # Journal analyses
+    journal_tbl = papers_by_journal(works)
+    write_csv(
+        os.path.join(out, "papers_by_journal.csv"),
+        ["journal", "journal_id", "papers", "citations"],
+        journal_tbl,
+    )
+    journal_year_tbl = papers_by_journal_year(works)
+    write_csv(
+        os.path.join(out, "papers_by_journal_year.csv"),
+        ["journal", "year", "papers", "citations"],
+        journal_year_tbl,
+    )
+    journal_st_tbl = papers_by_journal_study_type(works)
+    write_csv(
+        os.path.join(out, "papers_by_journal_study_type.csv"),
+        ["journal", "study_type", "papers", "citations"],
+        journal_st_tbl,
     )
 
     print_summary(works, rows, country_tbl, inst_tbl, study_type_tbl)

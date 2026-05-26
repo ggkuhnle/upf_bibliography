@@ -6,8 +6,10 @@ UPF co-authorship network with year slider, author search, and click-to-explore.
 
 Usage:
     python make_interactive_network.py
+    python make_interactive_network.py --primary   # first↔last-author edges only
 """
 
+import argparse
 import collections
 import json
 import os
@@ -15,9 +17,19 @@ import os
 import networkx as nx
 import pandas as pd
 
+
+def _args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--primary", action="store_true",
+                   help="Use first↔last-author edges (filters honorary middle authors)")
+    return p.parse_args()
+
+_ARGS = _args()
+
 # ── Config ────────────────────────────────────────────────────────────────────
 OUTPUT_DIR  = "output"
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "network_interactive.html")
+_suffix     = "_primary" if _ARGS.primary else ""
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, f"network_interactive{_suffix}.html")
 MIN_PAPERS  = 3
 PLOT_CAP    = 400
 LAYOUT_SEED = 42
@@ -31,10 +43,12 @@ PALETTE = [
 ]
 
 # ── Load ──────────────────────────────────────────────────────────────────────
-print("Loading data…")
-edges_df    = pd.read_csv(os.path.join(OUTPUT_DIR, "coauthorship_edges.csv"))
+print("Loading data…" + (" [primary-author mode]" if _ARGS.primary else ""))
+_e  = "coauthorship_edges_primary.csv"     if _ARGS.primary else "coauthorship_edges.csv"
+_ey = "coauthorship_edges_by_year_primary.csv" if _ARGS.primary else "coauthorship_edges_by_year.csv"
+edges_df    = pd.read_csv(os.path.join(OUTPUT_DIR, _e))
 authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_author.csv"))
-edges_yr_df = pd.read_csv(os.path.join(OUTPUT_DIR, "coauthorship_edges_by_year.csv"))
+edges_yr_df = pd.read_csv(os.path.join(OUTPUT_DIR, _ey))
 
 auth_lookup: dict = {}
 for _, r in authors_df.iterrows():
