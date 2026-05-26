@@ -53,6 +53,30 @@ jst_df = pd.read_csv(os.path.join(OUTPUT_DIR, "papers_by_journal_study_type.csv"
 cohort_path = os.path.join(OUTPUT_DIR, "papers_by_cohort.csv")
 c_df = pd.read_csv(cohort_path) if os.path.exists(cohort_path) else None
 
+# ── Filter non-journals (preprint servers, repositories, aggregators) ─────────
+# OpenAlex records these as primary sources but they are not peer-reviewed journals.
+_NON_JOURNALS = {
+    # Preprint servers
+    "biorxiv", "medrxiv", "ssrn electronic journal", "research square",
+    "authorea", "chemrxiv", "preprints.org", "arxiv",
+    # Data / institutional repositories
+    "figshare", "zenodo", "dryad", "osf preprints",
+    "la referencia",      # Latin-American institutional repo aggregator
+    "hal open science",
+    # Generic
+    "unknown",
+}
+
+def _is_non_journal(name):
+    if not isinstance(name, str):
+        return True
+    n = name.lower()
+    return any(nj in n for nj in _NON_JOURNALS)
+
+j_df   = j_df[~j_df["journal"].apply(_is_non_journal)].copy()
+jy_df  = jy_df[~jy_df["journal"].apply(_is_non_journal)].copy()
+jst_df = jst_df[~jst_df["journal"].apply(_is_non_journal)].copy()
+
 # ── Derived columns ───────────────────────────────────────────────────────────
 j_df = j_df[j_df["journal"].notna() & (j_df["journal"] != "Unknown")]
 j_df["cites_per_paper"] = (j_df["citations"] / j_df["papers"]).round(1)
