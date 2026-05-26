@@ -16,6 +16,7 @@ Usage
 import argparse
 import collections
 import csv
+from difflib import SequenceMatcher
 import json
 import logging
 import os
@@ -290,6 +291,69 @@ def papers_by_institution(rows: list[dict]) -> list[dict]:
     )
 
 
+def _norm_name(name) -> str:
+    """Normalise author name for similarity comparison.
+
+    Collapses spaces around dots ("P. E." -> "P.E.") and folds to lowercase,
+    so that minor formatting differences don't prevent matching.
+    """
+    if not isinstance(name, str):
+        return ""
+    name = re.sub(r'\.\s+', '.', name)
+    return re.sub(r'\s+', ' ', name).strip().lower()
+
+
+def _dedup_authors(records: list[dict]) -> list[dict]:
+    """Merge author records that OpenAlex split into multiple IDs.
+
+    Two records are merged when:
+      - They share the same institution (or one has no institution), AND
+      - Their normalised names are ≥ 0.92 similar (SequenceMatcher ratio).
+    The record with more papers is kept as the canonical entry; counts are summed.
+    """
+    records = sorted(records, key=lambda x: x["papers"], reverse=True)
+    merged = [False] * len(records)
+    out = []
+
+    for i, r1 in enumerate(records):
+        if merged[i]:
+            continue
+        n1   = _norm_name(r1["author_name"])
+        inst1 = r1.get("institution") or ""
+        for j in range(i + 1, len(records)):
+            if merged[j]:
+                continue
+            r2 = records[j]
+            inst2 = r2.get("institution") or ""
+            # Skip if institutions are both set but differ
+            if inst1 and inst2 and inst1 != inst2:
+                continue
+            n2 = _norm_name(r2["author_name"])
+            if SequenceMatcher(None, n1, n2).ratio() >= 0.92:
+                # Absorb r2 into r1
+                r1["papers"]               += r2["papers"]
+                r1["citations"]            += r2["citations"]
+                r1["first_author_papers"]  += r2["first_author_papers"]
+                r1["last_author_papers"]   += r2["last_author_papers"]
+                r1["middle_author_papers"] += r2["middle_author_papers"]
+                if not inst1 and inst2:
+                    r1["institution"] = inst2
+                if not r1.get("country") and r2.get("country"):
+                    r1["country"] = r2["country"]
+                merged[j] = True
+                log.debug("Merged '%s' (%s) into '%s' (%s)",
+                          r2["author_name"], r2["author_id"],
+                          r1["author_name"], r1["author_id"])
+        total = r1["papers"] or 1
+        r1["middle_author_rate"] = round(r1["middle_author_papers"] / total, 3)
+        out.append(r1)
+
+    n_merged = sum(merged)
+    if n_merged:
+        log.info("Author deduplication: merged %d duplicate record(s)", n_merged)
+    return out
+
+
 def papers_by_author(rows: list[dict]) -> list[dict]:
     seen: dict[tuple, dict] = {}
     for r in rows:
@@ -335,12 +399,8 @@ def papers_by_author(rows: list[dict]) -> list[dict]:
         if country_votes[key]:
             counter[key]["country"] = collections.Counter(country_votes[key]).most_common(1)[0][0]
 
-    result = []
-    for aid, v in counter.items():
-        total = v["papers"] or 1
-        v["middle_author_rate"] = round(v["middle_author_papers"] / total, 3)
-        result.append({"author_id": aid, **v})
-    return sorted(result, key=lambda x: x["papers"], reverse=True)
+    result = [{"author_id": aid, **v} for aid, v in counter.items()]
+    return _dedup_authors(result)
 
 
 # ── Department aggregation ────────────────────────────────────────────────────
