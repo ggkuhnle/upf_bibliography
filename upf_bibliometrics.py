@@ -455,7 +455,9 @@ _MESH_TRIAL = {
 }
 _MESH_REVIEW = {"Review", "Review Literature as Topic"}
 
-_KW_RCT  = {"randomized controlled trial", "randomised controlled trial"}
+# Stem match: catches randomised/randomized/randomisation/randomization/
+# randomised crossover / randomized feeding trial / etc.
+_RCT_RE  = re.compile(r'\brandomis[a-z]*\b|\brandomiz[a-z]*\b')
 _KW_META = {"systematic review", "meta-analysis", "meta analysis"}
 _KW_OBS  = {
     "cohort study", "cohort studies", "cross-sectional",
@@ -482,7 +484,7 @@ def classify_study_type(work: dict) -> str:
     if mesh_names & _MESH_REVIEW or work_type == "review":
         return "Review"
 
-    if any(kw in title for kw in _KW_RCT):
+    if _RCT_RE.search(title):
         return "RCT"
     if any(kw in title for kw in _KW_META):
         return "Systematic Review / Meta-analysis"
