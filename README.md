@@ -30,9 +30,10 @@ python upf_bibliometrics.py
 python make_interactive_network.py
 python make_influence_dashboard.py
 python make_world_map.py
+python make_study_type_dashboard.py
 
 # 3. Open index.html in a browser
-open index.html
+open output/index.html
 ```
 
 Use `--dry-run` on any script to fetch only the first 2 pages for testing.
@@ -42,7 +43,9 @@ Use `--dry-run` on any script to fetch only the first 2 pages for testing.
 ### `upf_bibliometrics.py`
 Queries OpenAlex for works matching `ultra-processed`, `ultraprocessed`, or `NOVA classification` in title/abstract. Handles cursor pagination and retries. Writes CSV tables to `output/` and prints a summary report.
 
-**Outputs:** `papers_by_country.csv`, `papers_by_institution.csv`, `papers_by_author.csv`, `papers_by_year.csv`, `papers_by_country_year.csv`, `coauthorship_edges.csv`, `coauthorship_edges_by_year.csv`, `network_metrics_by_year.csv`
+**Outputs:** `papers_by_country.csv`, `papers_by_institution.csv`, `papers_by_author.csv`, `papers_by_year.csv`, `papers_by_country_year.csv`, `coauthorship_edges.csv`, `coauthorship_edges_by_year.csv`, `network_metrics_by_year.csv`, `papers_by_study_type.csv`, `papers_by_study_type_year.csv`
+
+Study-type classification uses PubMed MeSH publication-type tags (priority 1), OpenAlex work type (priority 2), and title-keyword heuristics (priority 3). Categories: `RCT`, `Observational`, `Systematic Review / Meta-analysis`, `Clinical Trial`, `Review`, `Other`.
 
 ### `make_interactive_network.py`
 Builds a standalone HTML co-authorship network explorer from the edge CSVs. Year slider, author search, minimum-papers filter, community colours.
@@ -71,6 +74,11 @@ Renders the influence analysis results as an interactive HTML dashboard.
 Generates a global bubble map at institution level (falls back to country centroids). Exports interactive HTML and a 1 600 × 900 px PNG suitable for publication.
 
 **Output:** `output/world_map.html`, `output/world_map.png`
+
+### `make_study_type_dashboard.py`
+Reads `papers_by_study_type.csv` and `papers_by_study_type_year.csv` and renders a standalone HTML page with a donut chart and stacked bar chart.
+
+**Output:** `output/study_type.html`
 
 ## Project layout
 

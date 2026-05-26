@@ -22,6 +22,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 
 import requests
 
@@ -111,7 +112,8 @@ def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool =
             "mailto": MAILTO,
             "select": (
                 "id,doi,title,publication_year,"
-                "cited_by_count,authorships,funders,awards"
+                "cited_by_count,authorships,funders,awards,"
+                "type,mesh"
             ),
         }
 
@@ -430,6 +432,99 @@ def funding_by_country(works: list[dict], rows: list[dict]) -> list[dict]:
     return sorted(result, key=lambda x: x["papers"], reverse=True)
 
 
+# ── Study type classification ────────────────────────────────────────────────
+
+_MESH_RCT = {
+    "Randomized Controlled Trial", "Randomized Controlled Trials as Topic",
+}
+_MESH_META = {
+    "Meta-Analysis", "Meta-Analysis as Topic",
+    "Systematic Review", "Systematic Reviews as Topic",
+    "Network Meta-Analysis",
+}
+_MESH_OBS = {
+    "Observational Study", "Observational Studies as Topic",
+    "Cohort Studies", "Cross-Sectional Studies", "Case-Control Studies",
+    "Longitudinal Studies", "Prospective Studies", "Retrospective Studies",
+    "Follow-Up Studies", "Epidemiologic Studies",
+}
+_MESH_TRIAL = {
+    "Clinical Trial", "Clinical Trial, Phase I", "Clinical Trial, Phase II",
+    "Clinical Trial, Phase III", "Clinical Trial, Phase IV",
+    "Controlled Clinical Trial", "Clinical Trials as Topic",
+}
+_MESH_REVIEW = {"Review", "Review Literature as Topic"}
+
+_KW_RCT  = {"randomized controlled trial", "randomised controlled trial"}
+_KW_META = {"systematic review", "meta-analysis", "meta analysis"}
+_KW_OBS  = {
+    "cohort study", "cohort studies", "cross-sectional",
+    "case-control", "longitudinal study", "prospective study",
+    "retrospective study", "observational study",
+}
+
+
+def classify_study_type(work: dict) -> str:
+    """Return one of: RCT | Observational | Systematic Review / Meta-analysis |
+    Clinical Trial | Review | Other."""
+    mesh_names = {m.get("descriptor_name", "") for m in (work.get("mesh") or [])}
+    work_type  = (work.get("type") or "").lower()
+    title      = (work.get("title") or "").lower()
+
+    if mesh_names & _MESH_RCT:
+        return "RCT"
+    if mesh_names & _MESH_META:
+        return "Systematic Review / Meta-analysis"
+    if mesh_names & _MESH_OBS:
+        return "Observational"
+    if mesh_names & _MESH_TRIAL:
+        return "Clinical Trial"
+    if mesh_names & _MESH_REVIEW or work_type == "review":
+        return "Review"
+
+    if any(kw in title for kw in _KW_RCT):
+        return "RCT"
+    if any(kw in title for kw in _KW_META):
+        return "Systematic Review / Meta-analysis"
+    if any(kw in title for kw in _KW_OBS):
+        return "Observational"
+    if "review" in title:
+        return "Review"
+
+    return "Other"
+
+
+def papers_by_study_type(works: list[dict]) -> list[dict]:
+    counter: dict[str, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        st = classify_study_type(work)
+        counter[st]["papers"] += 1
+        counter[st]["citations"] += work.get("cited_by_count", 0)
+    total = sum(v["papers"] for v in counter.values()) or 1
+    return sorted(
+        [{"study_type": k, "papers": v["papers"],
+          "pct": round(100 * v["papers"] / total, 1),
+          "citations": v["citations"]}
+         for k, v in counter.items()],
+        key=lambda x: x["papers"], reverse=True,
+    )
+
+
+def papers_by_study_type_year(works: list[dict]) -> list[dict]:
+    counter: dict[tuple, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        year = work.get("publication_year")
+        if year is None:
+            continue
+        st = classify_study_type(work)
+        counter[(year, st)]["papers"] += 1
+        counter[(year, st)]["citations"] += work.get("cited_by_count", 0)
+    return sorted(
+        [{"year": k[0], "study_type": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["year"], x["study_type"]),
+    )
+
+
 # ── Temporal aggregations ─────────────────────────────────────────────────────
 
 def papers_by_year(works: list[dict]) -> list[dict]:
@@ -609,7 +704,7 @@ def write_csv(path: str, fieldnames: list[str], rows: list[dict]) -> None:
 
 # ── Summary report ─────────────────────────────────────────────────────────────
 
-def print_summary(works: list[dict], rows: list[dict], country_tbl: list[dict], inst_tbl: list[dict]) -> None:
+def print_summary(works: list[dict], rows: list[dict], country_tbl: list[dict], inst_tbl: list[dict], study_type_tbl: Optional[list[dict]] = None) -> None:
     total_papers = len(works)
     unique_authors = len({r["author_id"] or r["author_name"] for r in rows if r["author_name"]})
     unique_insts = len({r["institution"] for r in rows if r["institution"]})
@@ -653,6 +748,16 @@ def print_summary(works: list[dict], rows: list[dict], country_tbl: list[dict], 
     top5_pct = 100 * top5_papers / total_papers if total_papers else 0
     print(f"  CONCENTRATION: top-5 institutions account for "
           f"{top5_papers:,} papers ({top5_pct:.1f}% of total)")
+
+    # Study types
+    if study_type_tbl:
+        print()
+        print("  STUDY TYPES")
+        print(f"  {'Type':<36}  {'Papers':>8}  {'%':>6}")
+        print("  " + "-" * 52)
+        for rec in study_type_tbl:
+            print(f"  {rec['study_type']:<36}  {rec['papers']:>8,}  {rec['pct']:>5.1f}%")
+
     print(sep)
     print()
 
@@ -745,6 +850,19 @@ def main() -> None:
         funding_country_tbl,
     )
 
+    study_type_tbl = papers_by_study_type(works)
+    write_csv(
+        os.path.join(out, "papers_by_study_type.csv"),
+        ["study_type", "papers", "pct", "citations"],
+        study_type_tbl,
+    )
+    study_type_year_tbl = papers_by_study_type_year(works)
+    write_csv(
+        os.path.join(out, "papers_by_study_type_year.csv"),
+        ["year", "study_type", "papers", "citations"],
+        study_type_year_tbl,
+    )
+
     year_tbl = papers_by_year(works)
     write_csv(
         os.path.join(out, "papers_by_year.csv"),
@@ -782,7 +900,7 @@ def main() -> None:
         edges,
     )
 
-    print_summary(works, rows, country_tbl, inst_tbl)
+    print_summary(works, rows, country_tbl, inst_tbl, study_type_tbl)
 
 
 if __name__ == "__main__":
