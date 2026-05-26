@@ -182,35 +182,6 @@ def fig_journal_trends(jy_df, top_list, n=TOP_TREND):
     return fig
 
 
-# ── Figure 5: cohort analysis ─────────────────────────────────────────────────
-def fig_cohort(c_df):
-    d = c_df.nlargest(20, "papers").sort_values("papers")
-    fig = go.Figure()
-    for col, label, color in [
-        ("observational", "Observational", STUDY_COLORS["Observational"]),
-        ("rct",           "RCT",           STUDY_COLORS["RCT"]),
-        ("review",        "Review/SR",     STUDY_COLORS["Review"]),
-        ("other",         "Other",         STUDY_COLORS["Other"]),
-    ]:
-        fig.add_trace(go.Bar(
-            x=d.get(col, 0), y=d["cohort"],
-            orientation="h", name=label, marker_color=color,
-            hovertemplate=f"<b>%{{y}}</b><br>{label}: %{{x}}<extra></extra>",
-        ))
-    fig.update_layout(
-        title="Papers by cohort (title-detected, stacked by study type)",
-        barmode="stack",
-        xaxis_title="Papers", yaxis_title="",
-        height=max(420, len(d) * 22),
-        legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
-        margin=dict(l=10, r=10, t=50, b=80),
-        plot_bgcolor="white", paper_bgcolor="white",
-        yaxis=dict(tickfont=dict(size=11)),
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="#eee")
-    return fig
-
-
 # ── Assemble HTML ─────────────────────────────────────────────────────────────
 print("Building figures…")
 PLOTLY_CDN = "https://cdn.plot.ly/plotly-3.5.0.min.js"
@@ -221,9 +192,6 @@ figs = {
     "Study-type mix by journal":     fig_study_type_by_journal(jst_df, top_journals),
     "Publication trends":            fig_journal_trends(jy_df, top_journals),
 }
-if c_df is not None and len(c_df):
-    figs["Cohort papers"] = fig_cohort(c_df)
-
 # Convert to div strings
 fig_divs = {
     title: fig.to_html(full_html=False, include_plotlyjs=False,
@@ -286,7 +254,3 @@ print(f"\nTop 10 journals by papers:")
 for _, r in j_df.nlargest(10, "papers").iterrows():
     print(f"  {r['papers']:>5}  {r['cites_per_paper']:>6.1f} cit/paper  {r['journal']}")
 
-if c_df is not None and len(c_df):
-    print(f"\nCohort detection (title-based):")
-    for _, r in c_df.nlargest(10, "papers").iterrows():
-        print(f"  {r['papers']:>4} papers  {r['cohort']}")
