@@ -494,6 +494,46 @@ def classify_study_type(work: dict) -> str:
     return "Other"
 
 
+def papers_by_author_study_type(works: list[dict], rows: list[dict]) -> list[dict]:
+    """
+    For each (author, study_type) pair: how many UPF papers they have of that type.
+    Used by make_study_type_network.py to assign each author their dominant study type.
+    """
+    work_st = {w.get("id", ""): classify_study_type(w) for w in works}
+
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        author_key = r["author_id"] or r["author_name"]
+        if not author_key:
+            continue
+        st  = work_st.get(r["work_id"], "Other")
+        key = (r["work_id"], author_key)
+        if key not in seen:
+            seen[key] = {
+                "author_name": r["author_name"],
+                "author_id":   r["author_id"],
+                "institution": r["institution"],
+                "study_type":  st,
+                "citations":   r["citations"],
+            }
+
+    counter: dict[tuple, dict] = collections.defaultdict(
+        lambda: {"author_name": "", "author_id": "", "institution": "", "papers": 0, "citations": 0}
+    )
+    for (_, author_key), meta in seen.items():
+        key = (author_key, meta["study_type"])
+        counter[key]["author_name"] = counter[key]["author_name"] or meta["author_name"]
+        counter[key]["author_id"]   = counter[key]["author_id"]   or meta["author_id"]
+        counter[key]["institution"] = counter[key]["institution"]  or meta["institution"]
+        counter[key]["papers"]    += 1
+        counter[key]["citations"] += meta["citations"]
+
+    return sorted(
+        [{"author_id": k[0], "study_type": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["author_id"] or "", -x["papers"]),
+    )
+
+
 def papers_by_study_type(works: list[dict]) -> list[dict]:
     counter: dict[str, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
     for work in works:
@@ -861,6 +901,12 @@ def main() -> None:
         os.path.join(out, "papers_by_study_type_year.csv"),
         ["year", "study_type", "papers", "citations"],
         study_type_year_tbl,
+    )
+    author_st_tbl = papers_by_author_study_type(works, rows)
+    write_csv(
+        os.path.join(out, "papers_by_author_study_type.csv"),
+        ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
+        author_st_tbl,
     )
 
     year_tbl = papers_by_year(works)

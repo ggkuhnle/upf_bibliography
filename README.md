@@ -31,6 +31,7 @@ python make_interactive_network.py
 python make_influence_dashboard.py
 python make_world_map.py
 python make_study_type_dashboard.py
+python make_study_type_network.py
 
 # 3. Open index.html in a browser
 open output/index.html
@@ -45,7 +46,7 @@ Queries OpenAlex for works matching `ultra-processed`, `ultraprocessed`, or `NOV
 
 **Outputs:** `papers_by_country.csv`, `papers_by_institution.csv`, `papers_by_author.csv`, `papers_by_year.csv`, `papers_by_country_year.csv`, `coauthorship_edges.csv`, `coauthorship_edges_by_year.csv`, `network_metrics_by_year.csv`, `papers_by_study_type.csv`, `papers_by_study_type_year.csv`
 
-Study-type classification uses PubMed MeSH publication-type tags (priority 1), OpenAlex work type (priority 2), and title-keyword heuristics (priority 3). Categories: `RCT`, `Observational`, `Systematic Review / Meta-analysis`, `Clinical Trial`, `Review`, `Other`.
+Study-type classification uses PubMed MeSH publication-type tags (priority 1), OpenAlex work type (priority 2), and title-keyword heuristics (priority 3). Categories: `RCT`, `Observational`, `Systematic Review / Meta-analysis`, `Clinical Trial`, `Review`, `Other`. Also writes `papers_by_author_study_type.csv` (per-author breakdown by study type, used by `make_study_type_network.py`).
 
 ### `make_interactive_network.py`
 Builds a standalone HTML co-authorship network explorer from the edge CSVs. Year slider, author search, minimum-papers filter, community colours.
@@ -79,6 +80,11 @@ Generates a global bubble map at institution level (falls back to country centro
 Reads `papers_by_study_type.csv` and `papers_by_study_type_year.csv` and renders a standalone HTML page with a donut chart and stacked bar chart.
 
 **Output:** `output/study_type.html`
+
+### `make_study_type_network.py`
+Co-authorship network where each author node is coloured and shaped by their dominant study type. Shares the same layout and interactive controls as `make_interactive_network.py`. Requires `papers_by_author_study_type.csv`.
+
+**Output:** `output/network_study_type.html`
 
 ## Project layout
 
