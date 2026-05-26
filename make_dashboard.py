@@ -1240,6 +1240,12 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
           ("Study-type mix by journal (100% stacked bar)", ""),
           ("Publication trends", "")],
          p("journal_dashboard.html")),
+        ("c-teal",   "btn-teal",   "Citation Network",
+         "Who cites whom within this literature — internal citation graph and most-cited authors.",
+         [("Directed citation graph (top 300 nodes)", ""),
+          ("Community-coloured nodes", ""),
+          ("Most-cited authors bar chart", "")],
+         p("citation_network.html")),
     ]
 
     card_html = ""
@@ -1399,6 +1405,7 @@ def main():
         ("make_study_type_dashboard.py", "Building study-type dashboard"),
         ("make_study_type_network.py",   "Building study-type network"),
         ("make_journal_dashboard.py",    "Building journal dashboard"),
+        ("make_citation_network.py",    "Building citation network"),
     ]:
         print(f"{label} ({script_name}) …")
         result = subprocess.run(

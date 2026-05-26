@@ -124,7 +124,7 @@ def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool =
             "select": (
                 "id,doi,title,publication_year,"
                 "cited_by_count,authorships,funders,awards,"
-                "type,mesh,primary_location"
+                "type,mesh,primary_location,referenced_works"
             ),
         }
 
@@ -838,6 +838,82 @@ def primary_coauthorship_edges_by_year(rows: list[dict]) -> list[dict]:
     return sorted(result, key=lambda x: (x["year"], -x["papers"]))
 
 
+# ── Citation network edges ────────────────────────────────────────────────────
+
+def citation_edges(works: list[dict], rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Build citation edges restricted to works within this corpus.
+
+    Returns
+    -------
+    work_edges  : list of {citing_work_id, cited_work_id}
+    author_edges: list of {citing_author_id, citing_author_name,
+                           cited_author_id,  cited_author_name, citations}
+    """
+    # Set of all work IDs in the corpus
+    corpus_ids: set[str] = {w.get("id", "") for w in works if w.get("id")}
+
+    # work_id → [(author_id, author_name), ...] — one entry per unique author per work
+    work_authors: dict[str, list[tuple[str, str]]] = collections.defaultdict(list)
+    seen_wa: set[tuple[str, str]] = set()
+    for r in rows:
+        wid = r["work_id"]
+        aid = r.get("author_id") or ""
+        aname = r.get("author_name") or ""
+        if not aid:
+            continue
+        key = (wid, aid)
+        if key not in seen_wa:
+            seen_wa.add(key)
+            work_authors[wid].append((aid, aname))
+
+    # Build work-level edges
+    work_edge_set: set[tuple[str, str]] = set()
+    for work in works:
+        citing_id = work.get("id", "")
+        if not citing_id:
+            continue
+        for ref_id in (work.get("referenced_works") or []):
+            if ref_id in corpus_ids and ref_id != citing_id:
+                work_edge_set.add((citing_id, ref_id))
+
+    work_edges = [
+        {"citing_work_id": c, "cited_work_id": d}
+        for c, d in sorted(work_edge_set)
+    ]
+
+    # Build author-level edges: cross-product of authors for each work edge
+    # Accumulate citation counts; store names from first occurrence
+    author_edge_count: dict[tuple[str, str], int] = collections.defaultdict(int)
+    author_edge_names: dict[tuple[str, str], tuple[str, str]] = {}
+
+    for citing_id, cited_id in work_edge_set:
+        citing_authors = work_authors.get(citing_id, [])
+        cited_authors  = work_authors.get(cited_id,  [])
+        for ca_id, ca_name in citing_authors:
+            for cd_id, cd_name in cited_authors:
+                if ca_id == cd_id:
+                    continue  # skip self-citation
+                key = (ca_id, cd_id)
+                author_edge_count[key] += 1
+                if key not in author_edge_names:
+                    author_edge_names[key] = (ca_name, cd_name)
+
+    author_edges = []
+    for (ca_id, cd_id), count in sorted(author_edge_count.items(),
+                                         key=lambda x: -x[1]):
+        ca_name, cd_name = author_edge_names[(ca_id, cd_id)]
+        author_edges.append({
+            "citing_author_id":   ca_id,
+            "citing_author_name": ca_name,
+            "cited_author_id":    cd_id,
+            "cited_author_name":  cd_name,
+            "citations":          count,
+        })
+
+    return work_edges, author_edges
+
+
 # ── Temporal aggregations ─────────────────────────────────────────────────────
 
 def papers_by_year(works: list[dict]) -> list[dict]:
@@ -1198,6 +1274,16 @@ def main() -> None:
     write_csv(_out("coauthorship_edges_by_year_primary.csv"),
               ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
               primary_edges_yr)
+
+    work_cite_edges, author_cite_edges = citation_edges(works, rows)
+    write_csv(_out("citation_edges_work.csv"),
+              ["citing_work_id", "cited_work_id"], work_cite_edges)
+    write_csv(_out("citation_edges_author.csv"),
+              ["citing_author_id", "citing_author_name",
+               "cited_author_id", "cited_author_name", "citations"],
+              author_cite_edges)
+    log.info("Citation edges: %d work-level, %d author-level",
+             len(work_cite_edges), len(author_cite_edges))
 
     journal_tbl = papers_by_journal(works)
     write_csv(_out("papers_by_journal.csv"),
