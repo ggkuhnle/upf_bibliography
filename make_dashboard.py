@@ -630,7 +630,7 @@ def fig_funders(funders_df, funding_cty_df):
 def fig_departments(dept_df):
     top_d = dept_df[dept_df["department"].notna()].head(25).copy()
     top_d["label"] = top_d.apply(
-        lambda r: f"{r['department']} ({r['institution'][:30]})", axis=1)
+        lambda r: f"{r['department']} ({str(r['institution'] or '')[:30]})", axis=1)
     top_d["cit_per_paper"] = (top_d["citations"] / top_d["papers"]).round(1)
     fig = go.Figure(go.Bar(x=top_d.sort_values("papers")["papers"],
         y=top_d.sort_values("papers")["label"], orientation="h",
