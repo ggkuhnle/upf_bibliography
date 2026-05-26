@@ -1381,24 +1381,32 @@ def main():
 
     if args.fetch:
         here = os.path.dirname(__file__)
-        steps = [
-            ("bibliometrics.py",              "Fetching data"),
-            ("make_world_map.py",             "Building world map"),
-            ("make_interactive_network.py",   "Building interactive network"),
-            ("make_study_type_dashboard.py",  "Building study-type dashboard"),
-            ("make_study_type_network.py",    "Building study-type network"),
-            ("make_journal_dashboard.py",     "Building journal dashboard"),
-        ]
-        for script_name, label in steps:
-            script = os.path.join(here, script_name)
-            print(f"{label} ({script_name}) …")
-            result = subprocess.run(
-                [sys.executable, script, "--output-dir", out],
-                check=False,
-            )
-            if result.returncode != 0:
-                print(f"{script_name} exited with errors — continuing.")
+        script = os.path.join(here, "bibliometrics.py")
+        print(f"Fetching data (bibliometrics.py) …")
+        result = subprocess.run(
+            [sys.executable, script, "--output-dir", out],
+            check=False,
+        )
+        if result.returncode != 0:
+            print("bibliometrics.py exited with errors — aborting.")
+            sys.exit(result.returncode)
 
+
+    here = os.path.dirname(__file__)
+    for script_name, label in [
+        ("make_world_map.py",            "Building world map"),
+        ("make_interactive_network.py",  "Building interactive network"),
+        ("make_study_type_dashboard.py", "Building study-type dashboard"),
+        ("make_study_type_network.py",   "Building study-type network"),
+        ("make_journal_dashboard.py",    "Building journal dashboard"),
+    ]:
+        print(f"{label} ({script_name}) …")
+        result = subprocess.run(
+            [sys.executable, os.path.join(here, script_name), "--output-dir", out],
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"{script_name} exited with errors — continuing.")
 
     (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
      dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
