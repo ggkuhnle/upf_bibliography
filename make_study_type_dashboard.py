@@ -186,7 +186,7 @@ def build_html(st_df: pd.DataFrame, st_year_df: pd.DataFrame) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UPF Research — Study Type Breakdown</title>
+<title>{_TITLE} — Study Type Breakdown</title>
 <script src="https://cdn.plot.ly/plotly-3.5.0.min.js"></script>
 {STYLE}
 </head>
@@ -195,7 +195,7 @@ def build_html(st_df: pd.DataFrame, st_year_df: pd.DataFrame) -> str:
 
 <div id="hdr">
   <h1>Study Type Breakdown</h1>
-  <p>Classification of {total_papers:,} UPF papers by study design,
+  <p>Classification of {total_papers:,} {_TITLE} papers by study design,
      based on MeSH publication-type tags and title keywords.</p>
   <div class="stats">
     {stat_items}
@@ -238,7 +238,7 @@ def build_html(st_df: pd.DataFrame, st_year_df: pd.DataFrame) -> str:
 </main>
 <footer>
   Data: <a href="https://openalex.org">OpenAlex</a> · Analysis by G. Kuhnle ·
-  Generated May 2025
+  Generated {pd.Timestamp.now().strftime("%B %Y")}
 </footer>
 </body>
 </html>

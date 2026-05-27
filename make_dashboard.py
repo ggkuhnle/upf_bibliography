@@ -1246,6 +1246,12 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
           ("Community-coloured nodes", ""),
           ("Most-cited authors bar chart", "")],
          p("citation_network.html")),
+        ("c-teal",   "btn-teal",   "Citation Network Explorer",
+         "Fullscreen interactive explorer built on Cytoscape.js — draggable nodes, curved directed arrows, and per-edge paper details.",
+         [("Colour by country, research cluster, or publication volume", ""),
+          ("Path finder: shortest citation path between two authors", ""),
+          ("Click any edge to see the papers behind it", "")],
+         p("citation_network_cytoscape.html")),
     ]
 
     card_html = ""
