@@ -875,6 +875,38 @@ def papers_by_author_subclass(works: list[dict], rows: list[dict]) -> list[dict]
     )
 
 
+def funders_by_author(works: list[dict], rows: list[dict]) -> list[dict]:
+    """Map author_id → pipe-separated funder display names across all their papers."""
+    work_funders: dict[str, set] = {}
+    for work in works:
+        wid = work.get("id", "")
+        if not wid:
+            continue
+        fnames = {f.get("display_name", "") for f in (work.get("funders") or [])
+                  if f.get("display_name")}
+        if fnames:
+            work_funders[wid] = fnames
+
+    author_funders: dict[str, set] = collections.defaultdict(set)
+    author_names: dict[str, str] = {}
+    for r in rows:
+        aid = r["author_id"]
+        if not aid:
+            continue
+        wid = r["work_id"]
+        if wid in work_funders:
+            author_funders[aid].update(work_funders[wid])
+        if aid not in author_names:
+            author_names[aid] = r["author_name"]
+
+    return sorted(
+        [{"author_id": aid, "author_name": author_names.get(aid, ""),
+          "funders": "|".join(sorted(fnames))}
+         for aid, fnames in author_funders.items() if fnames],
+        key=lambda x: x["author_id"],
+    )
+
+
 def papers_by_journal(works: list[dict]) -> list[dict]:
     counter: dict[str, dict] = collections.defaultdict(
         lambda: {"journal_id": "", "papers": 0, "citations": 0}
@@ -1454,6 +1486,9 @@ def main() -> None:
     write_csv(_out("funding_by_country.csv"),
               ["country", "papers", "funded_papers", "pct_funded", "citations"],
               funding_country_tbl)
+    funders_auth_tbl = funders_by_author(works, rows)
+    write_csv(_out("funders_by_author.csv"),
+              ["author_id", "author_name", "funders"], funders_auth_tbl)
 
     study_type_tbl = papers_by_study_type(works)
     write_csv(_out("papers_by_study_type.csv"),

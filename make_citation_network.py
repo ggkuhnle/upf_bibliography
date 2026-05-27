@@ -272,7 +272,8 @@ def fig_betweenness(author_lookup, betweenness_map):
 
 def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
                           pagerank, in_adj_list, out_adj_list, edge_papers_map,
-                          n_communities, generated_date, author_subclass=None):
+                          n_communities, generated_date, author_subclass=None,
+                          author_funders=None):
     """Write a fullscreen Cytoscape.js citation-network explorer."""
     n_nodes = len(node_ids)
     n_edges = G_plot.number_of_edges()
@@ -316,6 +317,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
     n_recip = len(recip_set) // 2
     cy_scale = 1200
     _asc = author_subclass or {}
+    _afu = author_funders or {}
 
     # ── Nodes ─────────────────────────────────────────────────────────────────
     cy_nodes = []
@@ -325,6 +327,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
         country = m.get("country") or "—"
         papers_n = int(m.get("papers", 0))
         sc = _asc.get(nid, "—")
+        funders_str = _afu.get(nid, "")
         x, y = pos[nid]
         cy_nodes.append({
             "data": {
@@ -336,6 +339,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
                 "indeg":    indegree_map.get(nid, 0),
                 "outdeg":   G_plot.out_degree(nid),
                 "subclass":       sc,
+                "funders":        funders_str,
                 "colorComm":      PALETTE[partition.get(nid, 0) % len(PALETTE)],
                 "colorCountry":   ctr_color.get(country, "#bbbbbb"),
                 "colorPapers":    _pcol(papers_n),
@@ -472,13 +476,16 @@ var CY_STYLE = [
     'text-outline-width':3, 'text-outline-color':'rgba(255,255,255,0.9)',
     'border-width':0, 'z-index':1,
   }},
-  {selector:'node.labeled',  style:{'label':'data(label)'}},
-  {selector:'node.hovered',  style:{'label':'data(label)','border-width':2.5,'border-color':'#e74c3c','z-index':9999}},
-  {selector:'node.ego',      style:{'border-width':3,'border-color':'#e74c3c','z-index':100}},
-  {selector:'node.neighbor', style:{'border-width':2,'border-color':'rgba(231,76,60,0.4)','z-index':50}},
-  {selector:'node.faded',    style:{'opacity':0.07}},
-  {selector:'node.hidden',   style:{'display':'none'}},
-  {selector:'node.path-node',style:{'border-width':3,'border-color':'#27ae60','z-index':100}},
+  {selector:'node.labeled',       style:{'label':'data(label)'}},
+  {selector:'node.hovered',       style:{'label':'data(label)','border-width':2.5,'border-color':'#e74c3c','z-index':9999}},
+  {selector:'node.ego',           style:{'border-width':3,'border-color':'#e74c3c','z-index':100}},
+  {selector:'node.neighbor',      style:{'border-width':2,'border-color':'rgba(231,76,60,0.4)','z-index':50}},
+  {selector:'node.faded',         style:{'opacity':0.07}},
+  {selector:'node.hidden',        style:{'display':'none'}},
+  {selector:'node.path-node',     style:{'border-width':3,'border-color':'#27ae60','z-index':100}},
+  {selector:'node.funder-match',  style:{'border-width':4,'border-color':'#f39c12','z-index':110,'label':'data(label)'}},
+  {selector:'node.funder-faded',  style:{'opacity':0.06}},
+  {selector:'node.funder-unknown',style:{'opacity':0.22}},
   {selector:'edge', style:{
     'width':'data(width)',
     'line-color':'rgba(120,120,120,0.3)',
@@ -531,11 +538,38 @@ function selectNode(node) {
 function resetAll() {
   state.egoIdx=-1; state.pathFrom=-1; state.pathTo=-1;
   cy.elements().removeClass('ego neighbor faded hidden path-node path-edge');
+  clearFunderHighlight();
   document.getElementById('reset-btn').style.display='none';
   document.getElementById('side-panel').style.display='none';
   document.getElementById('edge-popup').style.display='none';
   document.getElementById('path-result').textContent='';
   ['srch-in','srch-in2','srch-in3'].forEach(function(id){document.getElementById(id).value='';});
+}
+
+function highlightFunder() {
+  var q = document.getElementById('funder-in').value.trim().toLowerCase();
+  cy.nodes().removeClass('funder-match funder-faded funder-unknown');
+  var badge = document.getElementById('funder-badge');
+  if (q.length < 2) { badge.textContent = ''; return; }
+  var matched = 0;
+  cy.nodes().forEach(function(n) {
+    var fs = (n.data('funders') || '').toLowerCase();
+    if (fs === '') {
+      n.addClass('funder-unknown');
+    } else if (fs.indexOf(q) >= 0) {
+      n.addClass('funder-match');
+      matched++;
+    } else {
+      n.addClass('funder-faded');
+    }
+  });
+  badge.textContent = matched + ' author' + (matched !== 1 ? 's' : '') + ' matched';
+}
+
+function clearFunderHighlight() {
+  document.getElementById('funder-in').value = '';
+  document.getElementById('funder-badge').textContent = '';
+  cy.nodes().removeClass('funder-match funder-faded funder-unknown');
 }
 
 function toggleNeighborsOnly() {
@@ -583,6 +617,7 @@ function openPanel(idx) {
     ['Cited by (in-degree)', d.indeg],['Cites (out-degree)', d.outdeg],
     ['Papers in corpus', d.papers],
     ['Total citations (OpenAlex)', (d.citations||0).toLocaleString()],
+    ['Funders', d.funders ? d.funders.replace(/\|/g,', ') : '—'],
   ].map(function(r){
     return '<div class="pr"><span class="pk">'+r[0]+'</span><span class="pv">'+r[1]+'</span></div>';
   }).join('');
@@ -748,6 +783,16 @@ document.addEventListener('DOMContentLoaded', function() {
   <span id="path-result"></span>
   <div class="sep"></div>
   <div class="cg">
+    <label>Highlight funder</label>
+    <div style="display:flex;gap:4px;align-items:center">
+      <input id="funder-in" class="srch-in" type="text" placeholder="e.g. Mars, NIH, EU…"
+             autocomplete="off" oninput="highlightFunder()" style="width:150px" />
+      <button class="tog" onclick="clearFunderHighlight()" title="Clear">&#x2715;</button>
+    </div>
+    <span id="funder-badge" style="font-size:.68rem;color:#e67e22;margin-top:2px"></span>
+  </div>
+  <div class="sep"></div>
+  <div class="cg">
     <label>Colour by</label>
     <select onchange="setColorMode(this.value)">
       <option value="comm">Research cluster</option>
@@ -851,6 +896,18 @@ def main():
             top_row = grp.loc[grp["papers"].idxmax()]
             author_subclass[aid] = top_row["subclass"]
         print(f"  Subclass data: {len(author_subclass)} authors with dominant subclass")
+
+    # Load funder data per author (optional)
+    funders_path = os.path.join(out, _pf("funders_by_author.csv"))
+    author_funders: dict = {}
+    if os.path.exists(funders_path):
+        fdf = pd.read_csv(funders_path)
+        for _, row in fdf.iterrows():
+            aid = row.get("author_id")
+            fs  = str(row.get("funders") or "")
+            if aid and fs and fs != "nan":
+                author_funders[aid] = fs
+        print(f"  Funder data: {len(author_funders)} authors with funding information")
 
     papers_path = os.path.join(out, _pf("citation_edges_author_papers.csv"))
     edge_papers_map: dict = {}
@@ -1672,6 +1729,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgrou
         pagerank, in_adj_list, out_adj_list, edge_papers_map,
         n_communities, generated_date,
         author_subclass=author_subclass or None,
+        author_funders=author_funders or None,
     )
 
 

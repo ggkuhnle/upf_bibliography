@@ -1,0 +1,31 @@
+{
+  "title": "Flavonoid research",
+  "prefix": "flavonoid",
+  "keywords": [
+    "flavonoid",
+    "flavonoids",
+    "flavanol",
+    "flavan-3-ol",
+    "flavan-3-ols",
+    "flavanone",
+    "flavanones",
+    "flavone",
+    "flavones",
+    "flavonol",
+    "flavonols",
+    "anthocyanidin",
+    "anthocyanidins",
+    "anthocyanin",
+    "anthocyanins",
+    "isoflavone",
+    "isoflavones"
+  ],
+  "subclasses": {
+    "Flavan-3-ol":  ["flavanol", "flavan-3-ol", "catechin", "epicatechin", "epigallocatechin", "procyanidin", "proanthocyanidin"],
+    "Flavanone":    ["flavanone", "hesperetin", "naringenin", "hesperidin", "naringin", "eriodictyol"],
+    "Flavone":      ["flavone", "luteolin", "apigenin", "chrysin", "baicalein", "wogonin"],
+    "Flavonol":     ["flavonol", "quercetin", "kaempferol", "myricetin", "fisetin", "rutin", "isorhamnetin"],
+    "Anthocyanin":  ["anthocyanidin", "anthocyanin", "cyanidin", "delphinidin", "pelargonidin", "malvidin", "peonidin"],
+    "Isoflavone":   ["isoflavone", "genistein", "daidzein", "equol", "formononetin", "biochanin", "glycitein"]
+  }
+}
