@@ -1378,6 +1378,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fetch only the first 2 pages (for testing).",
     )
+    parser.add_argument(
+        "--from-checkpoint",
+        action="store_true",
+        help="Skip fetch; process works already saved in the checkpoint JSONL file.",
+    )
     return parser.parse_args()
 
 
@@ -1402,9 +1407,20 @@ def main() -> None:
         log.info("DRY RUN — only first 2 pages will be fetched")
 
     os.makedirs(args.output_dir, exist_ok=True)
-    checkpoint_path = None if args.dry_run else _out("fetch_checkpoint")
-    works = fetch_all_works(args.terms, session, dry_run=args.dry_run,
-                            checkpoint_path=checkpoint_path)
+
+    if args.from_checkpoint:
+        works_file = _out("fetch_checkpoint") + ".jsonl"
+        if not os.path.exists(works_file):
+            log.error("No checkpoint file found at %s", works_file)
+            sys.exit(1)
+        log.info("Loading works from checkpoint: %s", works_file)
+        with open(works_file, encoding="utf-8") as fh:
+            works = [json.loads(ln) for ln in fh if ln.strip()]
+        log.info("Loaded %d works from checkpoint (fetch still in progress — checkpoint preserved)", len(works))
+    else:
+        checkpoint_path = None if args.dry_run else _out("fetch_checkpoint")
+        works = fetch_all_works(args.terms, session, dry_run=args.dry_run,
+                                checkpoint_path=checkpoint_path)
 
     if not works:
         log.warning("No works retrieved — check search terms or API availability.")
