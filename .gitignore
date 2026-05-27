@@ -27,4 +27,5 @@ Thumbs.db
 
 # Data directory (input data not committed)
 data/
+output/
 
