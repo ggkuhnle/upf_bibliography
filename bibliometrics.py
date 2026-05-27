@@ -1130,11 +1130,14 @@ def citation_edges(works: list[dict], rows: list[dict]) -> tuple[list[dict], lis
     author_edge_year_count: dict[tuple[str, str, int], int] = collections.defaultdict(int)
     author_edge_papers_set: dict[tuple[str, str], set] = collections.defaultdict(set)
 
+    _MAX_AUTHORS = 20  # skip author-pair expansion for large consortium papers
     for citing_id, cited_id in work_edge_set:
         year          = work_year.get(citing_id)
         citing_title  = work_title.get(citing_id, "")
         citing_authors = work_authors.get(citing_id, [])
         cited_authors  = work_authors.get(cited_id,  [])
+        if len(citing_authors) > _MAX_AUTHORS or len(cited_authors) > _MAX_AUTHORS:
+            continue
         for ca_id, ca_name in citing_authors:
             for cd_id, cd_name in cited_authors:
                 if ca_id == cd_id:
