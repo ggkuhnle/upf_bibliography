@@ -94,7 +94,18 @@ def _get(session: requests.Session, url: str, params: dict, retries: int = MAX_R
         try:
             resp = session.get(url, params=params, timeout=30)
             if resp.status_code == 429:
-                retry_after = min(int(resp.headers.get("Retry-After", 0)), 120)  # ignore absurd values
+                retry_after_raw = int(resp.headers.get("Retry-After", 0))
+                if retry_after_raw > 600:
+                    # Daily quota exhausted — Retry-After points to midnight reset
+                    hrs  = retry_after_raw // 3600
+                    mins = (retry_after_raw % 3600) // 60
+                    log.warning(
+                        "Daily API quota reached (Retry-After: %ds ≈ %dh %dm). "
+                        "Checkpoint saved — restart tomorrow to continue.",
+                        retry_after_raw, hrs, mins,
+                    )
+                    raise SystemExit(0)
+                retry_after = min(retry_after_raw, 120)  # ignore absurd values
                 wait = max(retry_after, min(60 * attempt, 600))  # 60s, 120s … cap at 600s
                 log.warning("Rate-limited (429); waiting %.0fs before retry %d/%d", wait, attempt, retries)
                 time.sleep(wait)
