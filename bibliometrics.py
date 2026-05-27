@@ -432,27 +432,48 @@ def _dedup_authors(records: list[dict]) -> list[dict]:
       - They share the same institution (or one has no institution), AND
       - Their normalised names are ≥ 0.92 similar (SequenceMatcher ratio).
     The record with more papers is kept as the canonical entry; counts are summed.
+
+    Comparisons are restricted to authors sharing the same last-name token,
+    reducing complexity from O(n²) to O(n × avg_surname_group_size).
     """
     records = sorted(records, key=lambda x: x["papers"], reverse=True)
+
+    # Group by (first-initial + last-name) to limit comparisons.
+    # Authors with only 1 paper are excluded — OpenAlex rarely splits them.
+    def _group_key(name: str) -> str:
+        parts = _norm_name(name).split()
+        if not parts:
+            return "\x00"
+        last  = parts[-1]
+        first = parts[0][0] if len(parts) > 1 else ""
+        return first + last
+
+    name_groups: dict[str, list[int]] = collections.defaultdict(list)
+    for i, r in enumerate(records):
+        if r["papers"] < 2:
+            continue
+        name_groups[_group_key(r["author_name"])].append(i)
+
     merged = [False] * len(records)
     out = []
+    n_merged = 0
 
     for i, r1 in enumerate(records):
         if merged[i]:
             continue
-        n1   = _norm_name(r1["author_name"])
+        n1    = _norm_name(r1["author_name"])
         inst1 = r1.get("institution") or ""
-        for j in range(i + 1, len(records)):
-            if merged[j]:
+        key   = _group_key(r1["author_name"])
+
+        for j in name_groups.get(key, []):
+            if j <= i or merged[j]:
                 continue
-            r2 = records[j]
+            r2    = records[j]
             inst2 = r2.get("institution") or ""
-            # Skip if institutions are both set but differ
             if inst1 and inst2 and inst1 != inst2:
                 continue
             n2 = _norm_name(r2["author_name"])
             if SequenceMatcher(None, n1, n2).ratio() >= 0.92:
-                # Absorb r2 into r1
                 r1["papers"]               += r2["papers"]
                 r1["citations"]            += r2["citations"]
                 r1["first_author_papers"]  += r2["first_author_papers"]
@@ -460,17 +481,19 @@ def _dedup_authors(records: list[dict]) -> list[dict]:
                 r1["middle_author_papers"] += r2["middle_author_papers"]
                 if not inst1 and inst2:
                     r1["institution"] = inst2
+                    inst1 = inst2
                 if not r1.get("country") and r2.get("country"):
                     r1["country"] = r2["country"]
                 merged[j] = True
+                n_merged  += 1
                 log.debug("Merged '%s' (%s) into '%s' (%s)",
                           r2["author_name"], r2["author_id"],
                           r1["author_name"], r1["author_id"])
+
         total = r1["papers"] or 1
         r1["middle_author_rate"] = round(r1["middle_author_papers"] / total, 3)
         out.append(r1)
 
-    n_merged = sum(merged)
     if n_merged:
         log.info("Author deduplication: merged %d duplicate record(s)", n_merged)
     return out
@@ -1469,11 +1492,17 @@ def main() -> None:
         log.warning("No works retrieved — check search terms or API availability.")
         sys.exit(0)
 
+    log.info("Flattening %d works into author-institution rows…", len(works))
     rows = flatten_works(works)
+    log.info("Flattened into %d rows", len(rows))
 
+    log.info("Aggregating by country…")
     country_tbl = papers_by_country(rows)
+    log.info("Aggregating by institution…")
     inst_tbl    = papers_by_institution(rows)
+    log.info("Aggregating by author…")
     author_tbl  = papers_by_author(rows)
+    log.info("Author table: %d unique authors", len(author_tbl))
 
     write_csv(_out("papers_by_country.csv"),
               ["country", "papers", "citations"], country_tbl)
@@ -1486,10 +1515,12 @@ def main() -> None:
                "middle_author_rate"],
               author_tbl)
 
+    log.info("Aggregating by department…")
     dept_tbl = papers_by_department(rows)
     write_csv(_out("papers_by_department.csv"),
               ["department", "institution", "country", "papers", "citations"], dept_tbl)
 
+    log.info("Aggregating by funder…")
     funder_tbl = papers_by_funder(works)
     write_csv(_out("papers_by_funder.csv"),
               ["funder_id", "funder_name", "papers", "citations"], funder_tbl)
@@ -1501,12 +1532,14 @@ def main() -> None:
     write_csv(_out("funders_by_author.csv"),
               ["author_id", "author_name", "funders"], funders_auth_tbl)
 
+    log.info("Classifying study types…")
     study_type_tbl = papers_by_study_type(works)
     write_csv(_out("papers_by_study_type.csv"),
               ["study_type", "papers", "pct", "citations"], study_type_tbl)
     study_type_year_tbl = papers_by_study_type_year(works)
     write_csv(_out("papers_by_study_type_year.csv"),
               ["year", "study_type", "papers", "citations"], study_type_year_tbl)
+    log.info("Aggregating author × study type…")
     author_st_tbl = papers_by_author_study_type(works, rows)
     write_csv(_out("papers_by_author_study_type.csv"),
               ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
@@ -1537,6 +1570,7 @@ def main() -> None:
                "cumulative_edges"],
               net_metrics_tbl)
 
+    log.info("Building coauthorship edges…")
     edges_by_year = coauthorship_edges_by_year(rows)
     write_csv(_out("coauthorship_edges_by_year.csv"),
               ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
@@ -1555,6 +1589,7 @@ def main() -> None:
               ["author1_id", "author1_name", "author2_id", "author2_name", "year", "papers"],
               primary_edges_yr)
 
+    log.info("Building citation edges…")
     work_cite_edges, author_cite_edges, author_cite_edges_yr, author_cite_edges_papers = citation_edges(works, rows)
     write_csv(_out("citation_edges_work.csv"),
               ["citing_work_id", "cited_work_id"], work_cite_edges)
