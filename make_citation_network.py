@@ -85,7 +85,9 @@ DISCLAIMER = (
     'target="_blank">OpenAlex</a>. '
     "Does not represent the views of any individual, institution, or organisation. "
     "Citation edges are restricted to works within this corpus; they do not reflect "
-    "total citation counts."
+    "total citation counts. "
+    "For papers with more than 20 authors (large consortium studies), citation edges "
+    "are attributed to the first and last author only."
     "</div>"
 )
 

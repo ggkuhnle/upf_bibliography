@@ -1130,14 +1130,20 @@ def citation_edges(works: list[dict], rows: list[dict]) -> tuple[list[dict], lis
     author_edge_year_count: dict[tuple[str, str, int], int] = collections.defaultdict(int)
     author_edge_papers_set: dict[tuple[str, str], set] = collections.defaultdict(set)
 
-    _MAX_AUTHORS = 20  # skip author-pair expansion for large consortium papers
+    # For large consortium papers, restrict to first+last author to avoid O(n²) explosion
+    _MAX_AUTHORS = 20
+
+    def _representative_authors(wid):
+        authors = work_authors.get(wid, [])
+        if len(authors) <= _MAX_AUTHORS:
+            return authors
+        return [authors[0], authors[-1]]
+
     for citing_id, cited_id in work_edge_set:
         year          = work_year.get(citing_id)
         citing_title  = work_title.get(citing_id, "")
-        citing_authors = work_authors.get(citing_id, [])
-        cited_authors  = work_authors.get(cited_id,  [])
-        if len(citing_authors) > _MAX_AUTHORS or len(cited_authors) > _MAX_AUTHORS:
-            continue
+        citing_authors = _representative_authors(citing_id)
+        cited_authors  = _representative_authors(cited_id)
         for ca_id, ca_name in citing_authors:
             for cd_id, cd_name in cited_authors:
                 if ca_id == cd_id:
@@ -1419,6 +1425,11 @@ def print_summary(works: list[dict], rows: list[dict], country_tbl: list[dict], 
         for rec in study_type_tbl:
             print(f"  {rec['study_type']:<36}  {rec['papers']:>8,}  {rec['pct']:>5.1f}%")
 
+    print(sep)
+    print("  LIMITATIONS")
+    print("  * Citation edges are restricted to works within this corpus.")
+    print("  * For papers with >20 authors, citation edges are attributed to")
+    print("    first and last author only (large consortium studies).")
     print(sep)
     print()
 
