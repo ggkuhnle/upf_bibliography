@@ -53,8 +53,8 @@ MAILTO = "g.kuhnle@reading.ac.uk"
 BASE_URL = "https://api.openalex.org/works"
 PAGE_SIZE = 200          # OpenAlex max per-cursor page
 REQUEST_DELAY = 1.0      # seconds between paginated requests
-MAX_RETRIES = 5
-RETRY_BACKOFF = 2.0      # exponential backoff base (seconds)
+MAX_RETRIES = 12
+RETRY_BACKOFF = 2.0      # exponential backoff base (seconds) — used for network errors only
 
 # Subclass keyword matching (populated from config.json "subclasses" key; empty = disabled)
 SUBCLASS_KWS: dict = {
@@ -89,12 +89,13 @@ def _session() -> requests.Session:
 
 
 def _get(session: requests.Session, url: str, params: dict, retries: int = MAX_RETRIES) -> dict:
-    """GET with exponential-backoff retry on network / 5xx errors."""
+    """GET with retry.  429s use a long linear backoff; network/5xx use exponential backoff."""
     for attempt in range(1, retries + 1):
         try:
             resp = session.get(url, params=params, timeout=30)
             if resp.status_code == 429:
-                wait = RETRY_BACKOFF ** attempt
+                retry_after = int(resp.headers.get("Retry-After", 0))
+                wait = max(retry_after, min(60 * attempt, 600))  # 60s, 120s … cap at 600s
                 log.warning("Rate-limited (429); waiting %.0fs before retry %d/%d", wait, attempt, retries)
                 time.sleep(wait)
                 continue
@@ -122,49 +123,105 @@ def build_filter(terms: list[str]) -> str:
 
 # ── Fetch all pages ────────────────────────────────────────────────────────────
 
-def fetch_all_works(terms: list[str], session: requests.Session, dry_run: bool = False) -> list[dict]:
-    """Paginate through OpenAlex cursor and return every work object."""
-    filter_str = build_filter(terms)
-    log.info("Filter: %s", filter_str)
+def fetch_all_works(terms: list[str], session: requests.Session,
+                    dry_run: bool = False, checkpoint_path: str = None) -> list[dict]:
+    """Paginate through OpenAlex cursor and return every work object.
 
-    cursor = "*"
-    works = []
+    If checkpoint_path is given, progress is written to:
+      <checkpoint_path>.cursor  — last good cursor + page count (JSON)
+      <checkpoint_path>.jsonl   — fetched works, one JSON object per line
+
+    On restart, if both files exist the fetch resumes from the saved cursor
+    instead of starting over.  Both files are deleted on clean completion.
+    """
+    filter_str = build_filter(terms)
+
+    cursor   = "*"
+    works: list[dict] = []
     page_num = 0
 
-    while cursor:
-        params = {
-            "filter": filter_str,
-            "per-page": PAGE_SIZE,
-            "cursor": cursor,
-            "mailto": MAILTO,
-            "select": (
-                "id,doi,title,publication_year,"
-                "cited_by_count,authorships,funders,awards,"
-                "type,mesh,primary_location,referenced_works"
-            ),
-        }
+    _cursor_file = (checkpoint_path + ".cursor") if checkpoint_path else None
+    _works_file  = (checkpoint_path + ".jsonl")  if checkpoint_path else None
+    _works_fh    = None
 
-        data = _get(session, BASE_URL, params)
-        meta = data.get("meta", {})
-        results = data.get("results", [])
-        next_cursor = meta.get("next_cursor")
+    # ── Resume from checkpoint if present ─────────────────────────────────────
+    if checkpoint_path and os.path.exists(_cursor_file) and os.path.exists(_works_file):
+        try:
+            with open(_cursor_file, encoding="utf-8") as fh:
+                saved    = json.load(fh)
+            cursor   = saved["cursor"]
+            page_num = saved["page_num"]
+            with open(_works_file, encoding="utf-8") as fh:
+                works = [json.loads(ln) for ln in fh if ln.strip()]
+            log.info("Resuming from checkpoint: page %d, %d works already fetched",
+                     page_num, len(works))
+            _works_fh = open(_works_file, "a", encoding="utf-8")
+        except Exception as exc:
+            log.warning("Checkpoint unreadable (%s); starting from scratch", exc)
+            cursor = "*"; works = []; page_num = 0
+            _works_fh = open(_works_file, "w", encoding="utf-8") if checkpoint_path else None
+    elif checkpoint_path:
+        _works_fh = open(_works_file, "w", encoding="utf-8")
 
-        page_num += 1
-        total = meta.get("count", "?")
-        log.info("Page %3d  —  fetched %d works  (total in API: %s)", page_num, len(results), total)
+    log.info("Filter: %s", filter_str)
 
-        works.extend(results)
+    try:
+        while cursor:
+            params = {
+                "filter": filter_str,
+                "per-page": PAGE_SIZE,
+                "cursor": cursor,
+                "mailto": MAILTO,
+                "select": (
+                    "id,doi,title,publication_year,"
+                    "cited_by_count,authorships,funders,awards,"
+                    "type,mesh,primary_location,referenced_works"
+                ),
+            }
 
-        if not results or not next_cursor:
-            break
+            data        = _get(session, BASE_URL, params)
+            meta        = data.get("meta", {})
+            results     = data.get("results", [])
+            next_cursor = meta.get("next_cursor")
 
-        cursor = next_cursor
+            page_num += 1
+            total = meta.get("count", "?")
+            log.info("Page %3d  —  fetched %d works  (total in API: %s)",
+                     page_num, len(results), total)
 
-        if dry_run and page_num >= 2:
-            log.info("Dry-run: stopping after 2 pages")
-            break
+            works.extend(results)
 
-        time.sleep(REQUEST_DELAY)
+            if _works_fh:
+                for w in results:
+                    _works_fh.write(json.dumps(w, separators=(",", ":")) + "\n")
+                _works_fh.flush()
+
+            if _cursor_file:
+                with open(_cursor_file, "w", encoding="utf-8") as fh:
+                    json.dump({"cursor": next_cursor or "", "page_num": page_num}, fh)
+
+            if not results or not next_cursor:
+                break
+
+            cursor = next_cursor
+
+            if dry_run and page_num >= 2:
+                log.info("Dry-run: stopping after 2 pages")
+                break
+
+            time.sleep(REQUEST_DELAY)
+
+    finally:
+        if _works_fh:
+            _works_fh.close()
+
+    # ── Clean up checkpoint on successful completion ───────────────────────────
+    if checkpoint_path:
+        for f in (_cursor_file, _works_file):
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
 
     log.info("Fetched %d works total across %d pages", len(works), page_num)
     return works
@@ -1344,7 +1401,10 @@ def main() -> None:
     if args.dry_run:
         log.info("DRY RUN — only first 2 pages will be fetched")
 
-    works = fetch_all_works(args.terms, session, dry_run=args.dry_run)
+    os.makedirs(args.output_dir, exist_ok=True)
+    checkpoint_path = None if args.dry_run else _out("fetch_checkpoint")
+    works = fetch_all_works(args.terms, session, dry_run=args.dry_run,
+                            checkpoint_path=checkpoint_path)
 
     if not works:
         log.warning("No works retrieved — check search terms or API availability.")
@@ -1355,8 +1415,6 @@ def main() -> None:
     country_tbl = papers_by_country(rows)
     inst_tbl    = papers_by_institution(rows)
     author_tbl  = papers_by_author(rows)
-
-    os.makedirs(args.output_dir, exist_ok=True)
 
     write_csv(_out("papers_by_country.csv"),
               ["country", "papers", "citations"], country_tbl)
