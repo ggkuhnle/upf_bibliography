@@ -56,6 +56,25 @@ LAYOUT_SEED = 42
 PLOTLY_CDN    = "https://cdn.plot.ly/plotly-3.5.0.min.js"
 CYTOSCAPE_CDN = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"
 
+SUBCLASS_SHAPES = {
+    "Flavan-3-ol":  "ellipse",
+    "Flavanone":    "triangle",
+    "Flavone":      "rectangle",
+    "Flavonol":     "diamond",
+    "Anthocyanin":  "pentagon",
+    "Isoflavone":   "hexagon",
+    "—":            "ellipse",
+}
+SUBCLASS_COLORS = {
+    "Flavan-3-ol":  "#636EFA",
+    "Flavanone":    "#EF553B",
+    "Flavone":      "#00CC96",
+    "Flavonol":     "#AB63FA",
+    "Anthocyanin":  "#FFA15A",
+    "Isoflavone":   "#19D3F3",
+    "—":            "#bbbbbb",
+}
+
 DISCLAIMER = (
     '<div style="background:#fff8e1;border-top:4px solid #f9a825;'
     'border-bottom:1px solid #f9a825;padding:10px 24px;'
@@ -253,7 +272,7 @@ def fig_betweenness(author_lookup, betweenness_map):
 
 def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
                           pagerank, in_adj_list, out_adj_list, edge_papers_map,
-                          n_communities, generated_date):
+                          n_communities, generated_date, author_subclass=None):
     """Write a fullscreen Cytoscape.js citation-network explorer."""
     n_nodes = len(node_ids)
     n_edges = G_plot.number_of_edges()
@@ -296,6 +315,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
     node_id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
     n_recip = len(recip_set) // 2
     cy_scale = 1200
+    _asc = author_subclass or {}
 
     # ── Nodes ─────────────────────────────────────────────────────────────────
     cy_nodes = []
@@ -304,6 +324,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
         name = m.get("author_name") or str(nid)
         country = m.get("country") or "—"
         papers_n = int(m.get("papers", 0))
+        sc = _asc.get(nid, "—")
         x, y = pos[nid]
         cy_nodes.append({
             "data": {
@@ -314,11 +335,14 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
                 "citations": int(m.get("citations", 0)),
                 "indeg":    indegree_map.get(nid, 0),
                 "outdeg":   G_plot.out_degree(nid),
-                "colorComm":    PALETTE[partition.get(nid, 0) % len(PALETTE)],
-                "colorCountry": ctr_color.get(country, "#bbbbbb"),
-                "colorPapers":  _pcol(papers_n),
+                "subclass":       sc,
+                "colorComm":      PALETTE[partition.get(nid, 0) % len(PALETTE)],
+                "colorCountry":   ctr_color.get(country, "#bbbbbb"),
+                "colorPapers":    _pcol(papers_n),
+                "colorSubclass":  SUBCLASS_COLORS.get(sc, "#bbbbbb"),
                 "sizeIndeg": _indeg_sz(indegree_map.get(nid, 0)),
                 "sizePR":    _pr_sz(pagerank.get(nid, pr_min)),
+                "shape":     SUBCLASS_SHAPES.get(sc, "ellipse"),
             },
             "position": {
                 "x": round(float(x) * cy_scale, 2),
@@ -347,6 +371,20 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
     cy_edges_js   = _json.dumps(cy_edges,  separators=(",", ":"))
     in_adj_js     = _json.dumps(in_adj_list,  separators=(",", ":"))
     out_adj_js    = _json.dumps(out_adj_list, separators=(",", ":"))
+
+    # Build shape legend HTML (shown when colour-by-subclass is selected)
+    _shape_syms = {"ellipse": "●", "triangle": "▲", "rectangle": "■",
+                   "diamond": "◆", "pentagon": "⬠", "hexagon": "⬡"}
+    _legend_items = [
+        f'<span style="margin-right:8px;color:{SUBCLASS_COLORS[sc]}">'
+        f'{_shape_syms.get(SUBCLASS_SHAPES[sc], "●")} {sc}</span>'
+        for sc in SUBCLASS_SHAPES if sc != "—"
+    ]
+    shape_legend_html = (
+        '<div id="shape-legend" style="font-size:.63rem;color:#555;'
+        'margin-top:4px;flex-basis:100%;display:none">'
+        + "".join(_legend_items) + "</div>"
+    )
 
     css = """\
 *{box-sizing:border-box;margin:0;padding:0}
@@ -428,9 +466,10 @@ var cy;
 var CY_STYLE = [
   {selector:'node', style:{
     'background-color':'data(colorComm)', 'width':'data(sizeIndeg)', 'height':'data(sizeIndeg)',
-    'label':'', 'font-size':9, 'text-valign':'top', 'text-halign':'center',
-    'text-wrap':'wrap', 'text-max-width':80, 'color':'#222',
-    'text-outline-width':2, 'text-outline-color':'rgba(255,255,255,0.85)',
+    'shape':'data(shape)',
+    'label':'', 'font-size':13, 'text-valign':'top', 'text-halign':'center',
+    'text-wrap':'wrap', 'text-max-width':120, 'color':'#111',
+    'text-outline-width':3, 'text-outline-color':'rgba(255,255,255,0.9)',
     'border-width':0, 'z-index':1,
   }},
   {selector:'node.labeled',  style:{'label':'data(label)'}},
@@ -467,8 +506,9 @@ function initCy() {
     minZoom:0.04, maxZoom:8,
     boxSelectionEnabled:false,
     selectionType:'single',
+    pixelRatio: 'auto',
   });
-  cy.nodes().sort(function(a,b){return b.data('indeg')-a.data('indeg');}).slice(0,20).addClass('labeled');
+  cy.nodes().sort(function(a,b){return b.data('indeg')-a.data('indeg');}).slice(0,30).addClass('labeled');
   cy.on('tap','node',  function(e){ selectNode(e.target); });
   cy.on('tap','edge',  function(e){ openEdgePopup(e.target); });
   cy.on('tap',         function(e){ if(e.target===cy) resetAll(); });
@@ -509,8 +549,10 @@ function toggleNeighborsOnly() {
 }
 
 function setColorMode(mode) {
-  var field = {comm:'colorComm', country:'colorCountry', papers:'colorPapers'}[mode]||'colorComm';
+  var field = {comm:'colorComm', country:'colorCountry', papers:'colorPapers', subclass:'colorSubclass'}[mode]||'colorComm';
   cy.nodes().style('background-color', function(ele){ return ele.data(field); });
+  var leg = document.getElementById('shape-legend');
+  if (leg) leg.style.display = mode === 'subclass' ? 'block' : 'none';
 }
 
 function setSizeMode(mode) {
@@ -537,6 +579,7 @@ function openPanel(idx) {
   document.getElementById('panel-name').textContent = d.name;
   document.getElementById('panel-rows').innerHTML = [
     ['Institution', d.inst||'—'],['Country', d.country||'—'],
+    ['Subclass', d.subclass||'—'],
     ['Cited by (in-degree)', d.indeg],['Cites (out-degree)', d.outdeg],
     ['Papers in corpus', d.papers],
     ['Total citations (OpenAlex)', (d.citations||0).toLocaleString()],
@@ -710,7 +753,9 @@ document.addEventListener('DOMContentLoaded', function() {
       <option value="comm">Research cluster</option>
       <option value="country">Country</option>
       <option value="papers">Publication volume</option>
+      <option value="subclass">Subclass</option>
     </select>
+    {shape_legend_html}
   </div>
   <div class="cg">
     <label>Node size</label>
@@ -796,6 +841,16 @@ def main():
         print(f"  Year-annotated edges loaded: {len(year_df):,} rows")
     else:
         print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
+
+    # Load dominant subclass per author (optional — requires --fetch with subclasses config)
+    sc_path = os.path.join(out, _pf("papers_by_author_subclass.csv"))
+    author_subclass: dict = {}
+    if os.path.exists(sc_path):
+        sc_df = pd.read_csv(sc_path)
+        for aid, grp in sc_df.groupby("author_id"):
+            top_row = grp.loc[grp["papers"].idxmax()]
+            author_subclass[aid] = top_row["subclass"]
+        print(f"  Subclass data: {len(author_subclass)} authors with dominant subclass")
 
     papers_path = os.path.join(out, _pf("citation_edges_author_papers.csv"))
     edge_papers_map: dict = {}
@@ -1616,6 +1671,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgrou
         out, G_plot, node_ids, author_lookup, partition, pos,
         pagerank, in_adj_list, out_adj_list, edge_papers_map,
         n_communities, generated_date,
+        author_subclass=author_subclass or None,
     )
 
 

@@ -59,6 +59,16 @@ TOP_N_RANKING   = 25
 LAYOUT_SEED     = 42
 PLOT_CAP        = 500
 
+SC_COLORS = {
+    "Flavan-3-ol":  "#636EFA",
+    "Flavanone":    "#EF553B",
+    "Flavone":      "#00CC96",
+    "Flavonol":     "#AB63FA",
+    "Anthocyanin":  "#FFA15A",
+    "Isoflavone":   "#19D3F3",
+    "—":            "#aaaaaa",
+}
+
 ST_COLORS = {
     "Observational":                     "#27ae60",
     "Systematic Review / Meta-analysis": "#8e44ad",
@@ -146,11 +156,24 @@ def load_data(out):
     else:
         print("  ⚠  Study type CSVs not found — re-run bibliometrics.py")
 
+    # Subclass CSVs (optional — only present when config has "subclasses")
+    subclass_df = subclass_year_df = subclass_auth_df = None
+    _sc_path      = os.path.join(out, _pf("papers_by_subclass.csv"))
+    _sc_yr_path   = os.path.join(out, _pf("papers_by_subclass_year.csv"))
+    _sc_auth_path = os.path.join(out, _pf("papers_by_author_subclass.csv"))
+    if os.path.exists(_sc_path):
+        subclass_df      = pd.read_csv(_sc_path)
+        subclass_year_df = pd.read_csv(_sc_yr_path) if os.path.exists(_sc_yr_path) else None
+        subclass_auth_df = pd.read_csv(_sc_auth_path) if os.path.exists(_sc_auth_path) else None
+        n_sc = int(subclass_df[subclass_df["subclass"] != "—"]["papers"].sum()) if subclass_df is not None else 0
+        print(f"  Subclass data loaded  ({n_sc:,} subclass-tagged papers)")
+
     print(f"  {len(edges_df):,} edge rows · {len(authors_df):,} author rows · "
           f"{len(institutions_df):,} institution rows")
     return (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
             dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
-            country_df, st_df, st_year_df, st_auth_df)
+            country_df, st_df, st_year_df, st_auth_df,
+            subclass_df, subclass_year_df, subclass_auth_df)
 
 
 # ── Build graph ───────────────────────────────────────────────────────────────
@@ -820,6 +843,56 @@ def fig_study_type_time(st_df, st_year_df):
     return fig
 
 
+def fig_subclass(subclass_df):
+    """Pie + horizontal bar of papers by flavonoid subclass."""
+    sc = subclass_df[subclass_df["subclass"] != "—"].sort_values("papers", ascending=False).reset_index(drop=True)
+    if sc.empty:
+        return None
+    colors = [SC_COLORS.get(t, "#aaa") for t in sc["subclass"]]
+    fig = make_subplots(rows=1, cols=2,
+        specs=[[{"type": "domain"}, {"type": "xy"}]],
+        subplot_titles=("Proportion", "Paper count"))
+    fig.add_trace(go.Pie(labels=sc["subclass"], values=sc["papers"],
+        hole=0.42, marker=dict(colors=colors, line=dict(color="white", width=2)),
+        textinfo="label+percent", textfont=dict(size=11), showlegend=False,
+        hovertemplate="<b>%{label}</b><br>Papers: %{value:,}<br>%{percent}<extra></extra>"),
+        row=1, col=1)
+    fig.add_trace(go.Bar(y=sc["subclass"][::-1], x=sc["papers"][::-1],
+        orientation="h", marker=dict(color=colors[::-1]),
+        text=sc["papers"][::-1].apply(lambda v: f"{int(v):,}"),
+        textposition="inside", insidetextanchor="end",
+        textfont=dict(color="white", size=11), showlegend=False,
+        hovertemplate="<b>%{y}</b><br>Papers: %{x:,}<extra></extra>"),
+        row=1, col=2)
+    fig.update_layout(title="Flavonoid subclass distribution",
+        height=360, margin=dict(t=60, b=20, l=20, r=20),
+        xaxis=dict(title="Papers", range=[0, int(sc["papers"].max()) * 1.1]),
+        plot_bgcolor="white", paper_bgcolor="white")
+    return fig
+
+
+def fig_subclass_time(subclass_df, subclass_year_df):
+    """Stacked bar of papers by subclass over time (2000 onwards)."""
+    if subclass_year_df is None or subclass_year_df.empty:
+        return None
+    _yr = subclass_year_df[subclass_year_df["year"] >= 2000].copy()
+    years = sorted(_yr["year"].unique())
+    sc_order = (subclass_df[subclass_df["subclass"] != "—"]
+                .sort_values("papers", ascending=False)["subclass"].tolist())
+    fig = go.Figure()
+    for sc in sc_order:
+        sub = _yr[_yr["subclass"] == sc].set_index("year")
+        vals = [int(sub.loc[y, "papers"]) if y in sub.index else 0 for y in years]
+        fig.add_trace(go.Bar(name=sc, x=years, y=vals,
+            marker_color=SC_COLORS.get(sc, "#aaa"),
+            hovertemplate=f"<b>{sc}</b><br>Year: %{{x}}<br>Papers: %{{y:,}}<extra></extra>"))
+    fig.update_layout(title="Flavonoid subclasses over time", barmode="stack",
+        height=400, xaxis=dict(title="Year"), yaxis=dict(title="Papers published"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        plot_bgcolor="white", paper_bgcolor="white", margin=dict(t=80, b=40, l=50, r=20))
+    return fig
+
+
 def fig_study_type_country(st_df, st_auth_df, authors_df):
     auth_ctr = authors_df[["author_id","country"]].drop_duplicates(subset="author_id")
     st_ctr   = st_auth_df.merge(auth_ctr, on="author_id", how="left")
@@ -1423,7 +1496,8 @@ def main():
 
     (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
      dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
-     country_df, st_df, st_year_df, st_auth_df) = load_data(out)
+     country_df, st_df, st_year_df, st_auth_df,
+     subclass_df, subclass_year_df, _subclass_auth_df) = load_data(out)
 
     G, G_lcc, node_attrs = build_graph(edges_df, authors_df)
     centrality_df        = compute_centrality(G_lcc)
@@ -1484,6 +1558,16 @@ def main():
         dashboard_figs.append(("Author Position Analysis", fig_author_position(authors_df)))
     else:
         print("  ⚠  Author position columns not found — re-run bibliometrics.py")
+
+    # Subclass figures
+    if subclass_df is not None:
+        print("  Building subclass figures…")
+        f_sc = fig_subclass(subclass_df)
+        if f_sc:
+            dashboard_figs.append(("Flavonoid Subclass Distribution", f_sc))
+        f_sc_t = fig_subclass_time(subclass_df, subclass_year_df)
+        if f_sc_t:
+            dashboard_figs.append(("Flavonoid Subclasses Over Time", f_sc_t))
 
     # §12 study type figures
     if st_df is not None:

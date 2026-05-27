@@ -56,6 +56,22 @@ REQUEST_DELAY = 1.0      # seconds between paginated requests
 MAX_RETRIES = 5
 RETRY_BACKOFF = 2.0      # exponential backoff base (seconds)
 
+# Subclass keyword matching (populated from config.json "subclasses" key; empty = disabled)
+SUBCLASS_KWS: dict = {
+    sc: [kw.lower() for kw in kws]
+    for sc, kws in (_CFG.get("subclasses") or {}).items()
+}
+
+
+def _classify_subclasses(title: str) -> list:
+    """Return list of subclass names whose keywords appear in title (word-boundary prefix match)."""
+    if not SUBCLASS_KWS or not title:
+        return []
+    tl = title.lower()
+    return [sc for sc, kws in SUBCLASS_KWS.items()
+            if any(re.search(r'\b' + re.escape(kw), tl) for kw in kws)]
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -197,6 +213,7 @@ def flatten_works(works: list[dict]) -> list[dict]:
         year     = work.get("publication_year")
         doi      = work.get("doi") or ""
         citations = work.get("cited_by_count", 0)
+        subclasses_str = "|".join(_classify_subclasses(title)) or "—"
 
         # Journal / venue info (work-level, same for every authorship row)
         loc = work.get("primary_location") or {}
@@ -213,6 +230,7 @@ def flatten_works(works: list[dict]) -> list[dict]:
                 "author_position": "",
                 "institution": "", "country": "",
                 "journal_name": journal_name, "journal_id": journal_id,
+                "subclasses": subclasses_str,
             })
             continue
 
@@ -233,6 +251,7 @@ def flatten_works(works: list[dict]) -> list[dict]:
                 "author_position": author_pos,
                 "department": department,
                 "journal_name": journal_name, "journal_id": journal_id,
+                "subclasses": subclasses_str,
             }
             if not institutions:
                 rows.append({**base, "institution": "", "country": ""})
@@ -705,6 +724,98 @@ def papers_by_study_type_year(works: list[dict]) -> list[dict]:
 def _journal_name(work: dict) -> str:
     src = (work.get("primary_location") or {}).get("source") or {}
     return (src.get("display_name") or "").strip() or "Unknown"
+
+
+def papers_by_subclass(works: list[dict]) -> list[dict]:
+    """Paper and citation counts per flavonoid subclass (requires config 'subclasses')."""
+    if not SUBCLASS_KWS:
+        return []
+    counter: dict[str, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        scs = _classify_subclasses(work.get("title") or "")
+        if not scs:
+            scs = ["—"]
+        cites = work.get("cited_by_count", 0)
+        for sc in scs:
+            counter[sc]["papers"] += 1
+            counter[sc]["citations"] += cites
+    return sorted(
+        [{"subclass": sc, **v} for sc, v in counter.items()],
+        key=lambda x: x["papers"], reverse=True,
+    )
+
+
+def papers_by_subclass_year(works: list[dict]) -> list[dict]:
+    """Paper count per (subclass, year); multi-label papers counted once per subclass."""
+    if not SUBCLASS_KWS:
+        return []
+    counter: dict[tuple, dict] = collections.defaultdict(lambda: {"papers": 0, "citations": 0})
+    for work in works:
+        year = work.get("publication_year")
+        if year is None:
+            continue
+        scs = _classify_subclasses(work.get("title") or "")
+        if not scs:
+            continue
+        cites = work.get("cited_by_count", 0)
+        for sc in scs:
+            counter[(year, sc)]["papers"] += 1
+            counter[(year, sc)]["citations"] += cites
+    return sorted(
+        [{"year": k[0], "subclass": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["year"], x["subclass"]),
+    )
+
+
+def papers_by_author_subclass(works: list[dict], rows: list[dict]) -> list[dict]:
+    """For each (author, subclass): how many papers in that subclass they have.
+    Used to assign each author a dominant subclass for network visualisation."""
+    if not SUBCLASS_KWS:
+        return []
+    work_scs: dict[str, list] = {
+        w.get("id", ""): _classify_subclasses(w.get("title") or "")
+        for w in works
+    }
+
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        author_key = r["author_id"] or r["author_name"]
+        if not author_key:
+            continue
+        scs = work_scs.get(r["work_id"], [])
+        if not scs:
+            continue
+        key = (r["work_id"], author_key)
+        if key not in seen:
+            seen[key] = {
+                "author_name": r["author_name"],
+                "author_id":   r["author_id"],
+                "institution": r["institution"],
+                "subclasses":  scs,
+                "citations":   r["citations"],
+            }
+
+    counter: dict[tuple, dict] = collections.defaultdict(
+        lambda: {"author_name": "", "author_id": "", "institution": "", "papers": 0, "citations": 0}
+    )
+    inst_votes: dict[tuple, list] = collections.defaultdict(list)
+    for (_, author_key), meta in seen.items():
+        for sc in meta["subclasses"]:
+            key = (author_key, sc)
+            counter[key]["author_name"] = counter[key]["author_name"] or meta["author_name"]
+            counter[key]["author_id"]   = counter[key]["author_id"]   or meta["author_id"]
+            counter[key]["papers"]    += 1
+            counter[key]["citations"] += meta["citations"]
+            if meta["institution"]:
+                inst_votes[key].append(meta["institution"])
+    for key in counter:
+        if inst_votes[key]:
+            counter[key]["institution"] = collections.Counter(inst_votes[key]).most_common(1)[0][0]
+
+    return sorted(
+        [{"author_id": k[0], "subclass": k[1], **v} for k, v in counter.items()],
+        key=lambda x: (x["author_id"] or "", -x["papers"]),
+    )
 
 
 def papers_by_journal(works: list[dict]) -> list[dict]:
@@ -1280,6 +1391,20 @@ def main() -> None:
     write_csv(_out("papers_by_author_study_type.csv"),
               ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
               author_st_tbl)
+
+    if SUBCLASS_KWS:
+        subclass_tbl = papers_by_subclass(works)
+        write_csv(_out("papers_by_subclass.csv"),
+                  ["subclass", "papers", "citations"], subclass_tbl)
+        subclass_year_tbl = papers_by_subclass_year(works)
+        write_csv(_out("papers_by_subclass_year.csv"),
+                  ["year", "subclass", "papers", "citations"], subclass_year_tbl)
+        author_sc_tbl = papers_by_author_subclass(works, rows)
+        write_csv(_out("papers_by_author_subclass.csv"),
+                  ["author_id", "author_name", "institution", "subclass", "papers", "citations"],
+                  author_sc_tbl)
+        log.info("Subclass tables: %d subclasses, %d author-subclass rows",
+                 len(subclass_tbl), len(author_sc_tbl))
 
     year_tbl = papers_by_year(works)
     write_csv(_out("papers_by_year.csv"), ["year", "papers", "citations"], year_tbl)

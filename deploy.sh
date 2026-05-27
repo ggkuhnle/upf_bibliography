@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REMOTE="gunter@kuhnle.co.uk:~/bibliometric/"
+#REMOTE="gunter@kuhnle.co.uk:~/misc/"
 OUTPUT="output"
 
 PREFIX=$(python3 -c "import json; print(json.load(open('config.json'))['prefix'])")
