@@ -94,7 +94,7 @@ def _get(session: requests.Session, url: str, params: dict, retries: int = MAX_R
         try:
             resp = session.get(url, params=params, timeout=30)
             if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", 0))
+                retry_after = min(int(resp.headers.get("Retry-After", 0)), 120)  # ignore absurd values
                 wait = max(retry_after, min(60 * attempt, 600))  # 60s, 120s … cap at 600s
                 log.warning("Rate-limited (429); waiting %.0fs before retry %d/%d", wait, attempt, retries)
                 time.sleep(wait)
