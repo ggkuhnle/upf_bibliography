@@ -80,7 +80,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ── API helpers ────────────────────────────────────────────────────────────────
+# ── API helpers ──────────────────────────────────────────── hippo ────────────
 
 def _session() -> requests.Session:
     s = requests.Session()

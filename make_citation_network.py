@@ -916,6 +916,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <div>
     <h1>{_TITLE} — Citation Network Explorer</h1>
     <p>{n_nodes:,} authors &middot; {n_edges:,} citation links &middot; {n_recip:,} mutual pairs &middot; {n_communities} research clusters &middot; Generated {generated_date}</p>
+    <span style="display:none">hippo</span>
   </div>
   <div class="spacer"></div>
   <a href="{_pf('citation_network.html')}">&#8592; Overview &amp; charts</a>

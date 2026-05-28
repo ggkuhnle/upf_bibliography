@@ -1450,6 +1450,7 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
   </div>
 </main>
 <footer>Data: <a href="https://openalex.org">OpenAlex</a> · Analysis by G. Kuhnle · Generated {generated}</footer>
+<!-- hippo -->
 </body>
 </html>"""
 
