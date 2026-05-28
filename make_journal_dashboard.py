@@ -32,7 +32,7 @@ _PREFIX = _CFG.get("prefix", "")
 _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
-    return f"{_PREFIX}_{name}" if _PREFIX else name
+    return name
 
 TOP_N       = 25
 TOP_TREND   = 10
@@ -189,14 +189,16 @@ def fig_journal_trends(jy_df, top_list, n=TOP_TREND):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", default=os.path.join(OUTPUT_DIR, _PREFIX) if _PREFIX else OUTPUT_DIR)
+    parser.add_argument("--data-dir", default=os.path.join("data", _PREFIX) if _PREFIX else "data")
     args = parser.parse_args()
     out = args.output_dir
+    data = args.data_dir
 
     print("Loading data…")
-    j_df   = pd.read_csv(os.path.join(out, _pf("papers_by_journal.csv")))
-    jy_df  = pd.read_csv(os.path.join(out, _pf("papers_by_journal_year.csv")))
-    jst_df = pd.read_csv(os.path.join(out, _pf("papers_by_journal_study_type.csv")))
+    j_df   = pd.read_csv(os.path.join(data, _pf("papers_by_journal.csv")))
+    jy_df  = pd.read_csv(os.path.join(data, _pf("papers_by_journal_year.csv")))
+    jst_df = pd.read_csv(os.path.join(data, _pf("papers_by_journal_study_type.csv")))
 
     j_df   = j_df[~j_df["journal"].apply(_is_non_journal)].copy()
     jy_df  = jy_df[~jy_df["journal"].apply(_is_non_journal)].copy()

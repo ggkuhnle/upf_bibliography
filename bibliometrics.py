@@ -48,7 +48,7 @@ DEFAULT_TERMS = _CFG.get("keywords", [
     "ultraprocessed diet",
     "NOVA food classification",
 ])
-DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_DATA_DIR = "data"
 MAILTO = "g.kuhnle@reading.ac.uk"
 BASE_URL = "https://api.openalex.org/works"
 PAGE_SIZE = 200          # OpenAlex max per-cursor page
@@ -1447,9 +1447,10 @@ def parse_args() -> argparse.Namespace:
         metavar="TERM",
         help="Search terms (title+abstract). Default: %(default)s",
     )
+    _pfx = _CFG.get("prefix", "")
     parser.add_argument(
         "--output-dir",
-        default=DEFAULT_OUTPUT_DIR,
+        default=os.path.join("data", _pfx) if _pfx else "data",
         metavar="DIR",
         help="Directory for CSV output files. Default: %(default)s",
     )
@@ -1475,7 +1476,7 @@ def main() -> None:
     prefix  = _CFG.get("prefix", "")
 
     def _pf(name: str) -> str:
-        return f"{prefix}_{name}" if prefix else name
+        return name
 
     def _out(name: str) -> str:
         return os.path.join(args.output_dir, _pf(name))

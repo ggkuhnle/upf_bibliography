@@ -30,7 +30,7 @@ _PREFIX = _CFG.get("prefix", "")
 _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
-    return f"{_PREFIX}_{name}" if _PREFIX else name
+    return name
 
 # ── Institution lat/lon (top institutions hand-coded; rest fall back to country) ─
 INST_COORDS = {
@@ -242,12 +242,22 @@ SHORT_NAMES = {
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--prefix", default=None, help="Override config prefix")
+    parser.add_argument("--title", default=None, help="Override config title")
     args = parser.parse_args()
-    out = args.output_dir
+
+    global _PREFIX, _TITLE
+    if args.prefix is not None:
+        _PREFIX = args.prefix
+    if args.title is not None:
+        _TITLE = args.title
+    out  = args.output_dir or (os.path.join(OUTPUT_DIR, _PREFIX) if _PREFIX else OUTPUT_DIR)
+    data = args.data_dir or (os.path.join("data", _PREFIX) if _PREFIX else "data")
 
     print("Loading data …")
-    inst_df = pd.read_csv(os.path.join(out, _pf("papers_by_institution.csv")))
+    inst_df = pd.read_csv(os.path.join(data, _pf("papers_by_institution.csv")))
     inst_df = inst_df[inst_df["institution"].notna() & (inst_df["institution"] != "")]
     inst_df = inst_df[inst_df["country"].notna() & (inst_df["country"] != "")]
 

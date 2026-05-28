@@ -38,7 +38,7 @@ _TITLE  = _CFG.get("title", "Research")
 
 
 def _pf(name):
-    return f"{_PREFIX}_{name}" if _PREFIX else name
+    return name
 
 
 PALETTE = [
@@ -488,6 +488,14 @@ var CY_STYLE = [
   {selector:'node.funder-match',  style:{'border-width':4,'border-color':'#f39c12','z-index':110,'label':'data(label)'}},
   {selector:'node.funder-faded',  style:{'opacity':0.06}},
   {selector:'node.funder-unknown',style:{'opacity':0.22}},
+  {selector:'node.inf-seed',  style:{'border-width':5,'border-color':'#c0392b','z-index':120,'label':'data(label)'}},
+  {selector:'node.inf-dn1',  style:{'border-width':3,'border-color':'#8e44ad','z-index':110,'label':'data(label)'}},
+  {selector:'node.inf-dn2',  style:{'border-width':2,'border-color':'#bb8fce','z-index':100}},
+  {selector:'node.inf-dn3',  style:{'border-width':1.5,'border-color':'#d7bde2','z-index':90}},
+  {selector:'node.inf-up1',  style:{'border-width':3,'border-color':'#0d9488','z-index':110,'label':'data(label)'}},
+  {selector:'node.inf-up2',  style:{'border-width':2,'border-color':'#5eead4','z-index':100}},
+  {selector:'node.inf-up3',  style:{'border-width':1.5,'border-color':'#99f6e4','z-index':90}},
+  {selector:'node.inf-faded',style:{'opacity':0.05}},
   {selector:'edge', style:{
     'width':'data(width)',
     'line-color':'rgba(120,120,120,0.3)',
@@ -541,6 +549,7 @@ function resetAll() {
   state.egoIdx=-1; state.pathFrom=-1; state.pathTo=-1;
   cy.elements().removeClass('ego neighbor faded hidden path-node path-edge');
   clearFunderHighlight();
+  clearInfluence();
   document.getElementById('reset-btn').style.display='none';
   document.getElementById('side-panel').style.display='none';
   document.getElementById('edge-popup').style.display='none';
@@ -551,6 +560,9 @@ function resetAll() {
 function highlightFunder() {
   var q = document.getElementById('funder-in').value.trim().toLowerCase();
   cy.nodes().removeClass('funder-match funder-faded funder-unknown');
+  // Clear influence so classes don't conflict
+  cy.nodes().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
+  document.getElementById('inf-badge').textContent = '';
   var badge = document.getElementById('funder-badge');
   if (q.length < 2) { badge.textContent = ''; return; }
   var matched = 0;
@@ -572,6 +584,84 @@ function clearFunderHighlight() {
   document.getElementById('funder-in').value = '';
   document.getElementById('funder-badge').textContent = '';
   cy.nodes().removeClass('funder-match funder-faded funder-unknown');
+}
+
+var _infDepth = 1;
+var _infDir   = 'down';
+
+function setInfluenceDepth(d) {
+  _infDepth = d;
+  [1,2,3].forEach(function(n){
+    document.getElementById('inf-d'+n).classList.toggle('active', n===d);
+  });
+  exploreInfluence();
+}
+
+function setInfluenceDir(dir) {
+  _infDir = dir;
+  document.getElementById('inf-dir-down').classList.toggle('active', dir==='down');
+  document.getElementById('inf-dir-up').classList.toggle('active', dir==='up');
+  exploreInfluence();
+}
+
+function exploreInfluence() {
+  var q = document.getElementById('inf-in').value.trim().toLowerCase();
+  cy.nodes().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
+  var badge = document.getElementById('inf-badge');
+  if (q.length < 2) { badge.textContent = ''; return; }
+
+  // Clear funder highlight so classes don't conflict
+  cy.nodes().removeClass('funder-match funder-faded funder-unknown');
+  document.getElementById('funder-badge').textContent = '';
+
+  // Seeds: match author name OR any funder string
+  var seeds = cy.nodes().filter(function(n) {
+    return (n.data('name')    || '').toLowerCase().indexOf(q) >= 0
+        || (n.data('funders') || '').toLowerCase().indexOf(q) >= 0;
+  });
+  if (!seeds.length) { badge.textContent = 'No match'; return; }
+
+  // BFS through directed citation edges
+  var distMap = new Map();
+  seeds.forEach(function(n){ distMap.set(n.id(), 0); });
+  var frontier = seeds.toArray();
+
+  for (var d = 1; d <= _infDepth; d++) {
+    var next = [];
+    frontier.forEach(function(n){
+      var nbrs = _infDir === 'down' ? n.incomers('node') : n.outgoers('node');
+      nbrs.forEach(function(nb){
+        if (!distMap.has(nb.id())){ distMap.set(nb.id(), d); next.push(nb); }
+      });
+    });
+    frontier = next;
+  }
+
+  // Apply classes — downstream (purple) vs upstream (teal)
+  var pfx = _infDir === 'down' ? 'dn' : 'up';
+  var counts = [0,0,0,0];
+  cy.nodes().forEach(function(n){
+    var d = distMap.get(n.id());
+    if (d === undefined) { n.addClass('inf-faded'); return; }
+    counts[d]++;
+    if      (d===0) n.addClass('inf-seed');
+    else if (d===1) n.addClass('inf-'+pfx+'1');
+    else if (d===2) n.addClass('inf-'+pfx+'2');
+    else            n.addClass('inf-'+pfx+'3');
+  });
+
+  var label = _infDir === 'down' ? 'citing' : 'cited';
+  var parts = [counts[0] + ' seed' + (counts[0]>1?'s':'')];
+  for (var i = 1; i <= _infDepth; i++) {
+    if (counts[i]) parts.push(counts[i] + ' ' + label + '@' + i);
+  }
+  badge.textContent = parts.join(' · ');
+}
+
+function clearInfluence() {
+  document.getElementById('inf-in').value = '';
+  document.getElementById('inf-badge').textContent = '';
+  cy.nodes().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
 }
 
 function toggleNeighborsOnly() {
@@ -724,11 +814,75 @@ function makeDd(inId, ddId, onSelect) {
   inp.addEventListener('focus',function(){if(inp.value.trim().length>=2)show(inp.value.trim());});
 }
 
+var FUNDER_NAMES = (function() {
+  var seen = new Set(), list = [];
+  CY_NODES.forEach(function(n) {
+    (n.data.funders || '').split('|').forEach(function(f) {
+      f = f.trim();
+      if (f && !seen.has(f)) { seen.add(f); list.push(f); }
+    });
+  });
+  return list.sort();
+})();
+
+function makeFunderDd() {
+  var inp = document.getElementById('funder-in');
+  var dd  = document.getElementById('funder-dd');
+  function show(q) {
+    var ql = q.toLowerCase();
+    var hits = FUNDER_NAMES.filter(function(f){ return f.toLowerCase().indexOf(ql)>=0; }).slice(0,16);
+    if (!hits.length) { dd.style.display='none'; return; }
+    dd.innerHTML = hits.map(function(f){
+      return '<div class="dd-item" data-f="'+f.replace(/"/g,'&quot;')+'">'+f+'</div>';
+    }).join('');
+    dd.querySelectorAll('.dd-item').forEach(function(el){
+      el.addEventListener('mousedown',function(e){
+        e.preventDefault(); inp.value=el.dataset.f; dd.style.display='none'; highlightFunder();
+      });
+    });
+    dd.style.display='block';
+  }
+  inp.addEventListener('input', function(){ var q=inp.value.trim(); if(q.length>=2)show(q); else dd.style.display='none'; });
+  inp.addEventListener('blur',  function(){ setTimeout(function(){ dd.style.display='none'; },160); });
+  inp.addEventListener('focus', function(){ if(inp.value.trim().length>=2)show(inp.value.trim()); });
+}
+
+function makeInfluenceDd() {
+  var inp = document.getElementById('inf-in');
+  var dd  = document.getElementById('inf-dd');
+  var authors = NODE_NAMES.map(function(n,i){ return {label:n, sub:NODE_INST[i]||'', type:'author'}; });
+  var funders = FUNDER_NAMES.map(function(f){ return {label:f, sub:'', type:'funder'}; });
+  var combined = authors.concat(funders).sort(function(a,b){ return a.label.localeCompare(b.label); });
+  function show(q) {
+    var ql = q.toLowerCase();
+    var hits = combined.filter(function(x){ return x.label.toLowerCase().indexOf(ql)>=0; }).slice(0,20);
+    if (!hits.length) { dd.style.display='none'; return; }
+    dd.innerHTML = hits.map(function(h){
+      var badge = h.type==='funder'
+        ? '<span style="font-size:.6rem;background:#ede9fe;color:#5b21b6;padding:1px 5px;border-radius:10px;margin-left:4px">funder</span>'
+        : '';
+      return '<div class="dd-item" data-lbl="'+h.label.replace(/"/g,'&quot;')+'"><div>'+h.label+badge+'</div>'
+           + (h.sub?'<div class="dd-sub">'+h.sub+'</div>':'')+'</div>';
+    }).join('');
+    dd.querySelectorAll('.dd-item').forEach(function(el){
+      el.addEventListener('mousedown',function(e){
+        e.preventDefault(); inp.value=el.dataset.lbl; dd.style.display='none'; exploreInfluence();
+      });
+    });
+    dd.style.display='block';
+  }
+  inp.addEventListener('input', function(){ var q=inp.value.trim(); if(q.length>=2)show(q); else dd.style.display='none'; });
+  inp.addEventListener('blur',  function(){ setTimeout(function(){ dd.style.display='none'; },160); });
+  inp.addEventListener('focus', function(){ if(inp.value.trim().length>=2)show(inp.value.trim()); });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   initCy();
   makeDd('srch-in',  'srch-dd1', function(i){ selectNode(cy.getElementById(String(i))); });
   makeDd('srch-in2', 'srch-dd2', function(i){ state.pathFrom=i; });
   makeDd('srch-in3', 'srch-dd3', function(i){ state.pathTo=i; });
+  makeFunderDd();
+  makeInfluenceDd();
   document.getElementById('close-panel').addEventListener('click',function(){
     document.getElementById('side-panel').style.display='none';
   });
@@ -787,11 +941,55 @@ document.addEventListener('DOMContentLoaded', function() {
   <div class="cg">
     <label>Highlight funder</label>
     <div style="display:flex;gap:4px;align-items:center">
-      <input id="funder-in" class="srch-in" type="text" placeholder="e.g. Mars, NIH, EU…"
-             autocomplete="off" oninput="highlightFunder()" style="width:150px" />
+      <div style="position:relative">
+        <input id="funder-in" class="srch-in" type="text" placeholder="e.g. NIH, MRC, ERC, EU…"
+               autocomplete="off" oninput="highlightFunder()" style="width:150px" />
+        <div class="dd" id="funder-dd"></div>
+      </div>
       <button class="tog" onclick="clearFunderHighlight()" title="Clear">&#x2715;</button>
     </div>
     <span id="funder-badge" style="font-size:.68rem;color:#e67e22;margin-top:2px"></span>
+  </div>
+  <div class="sep"></div>
+  <div class="cg">
+    <label>Influence explorer</label>
+    <div style="display:flex;gap:4px;align-items:center">
+      <div style="position:relative">
+        <input id="inf-in" class="srch-in" type="text" placeholder="Author or funder…"
+               autocomplete="off" oninput="exploreInfluence()" style="width:150px" />
+        <div class="dd" id="inf-dd"></div>
+      </div>
+      <button class="tog" onclick="clearInfluence()" title="Clear">&#x2715;</button>
+    </div>
+    <div style="display:flex;gap:4px;margin-top:4px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:.68rem;color:#888;white-space:nowrap">Direction:</span>
+      <div class="btn-grp">
+        <button id="inf-dir-down" class="tog active" onclick="setInfluenceDir('down')"
+                title="Who cites the seed — work the seed influenced">&#8595; influenced</button>
+        <button id="inf-dir-up"   class="tog"        onclick="setInfluenceDir('up')"
+                title="Who the seed cites — work that shaped the seed">&#8593; influencers</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
+      <span style="font-size:.68rem;color:#888">Depth:</span>
+      <div class="btn-grp">
+        <button id="inf-d1" class="tog active" onclick="setInfluenceDepth(1)">1</button>
+        <button id="inf-d2" class="tog"        onclick="setInfluenceDepth(2)">2</button>
+        <button id="inf-d3" class="tog"        onclick="setInfluenceDepth(3)">3</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:3px;align-items:center;margin-top:4px;flex-wrap:wrap">
+      <span style="width:9px;height:9px;border-radius:50%;background:#c0392b;display:inline-block"></span><span style="font-size:.63rem;color:#888;margin-right:6px">seed</span>
+      <span style="font-size:.63rem;color:#888;margin-right:2px">↓</span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#8e44ad;display:inline-block"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#bb8fce;display:inline-block"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#d7bde2;display:inline-block;margin-right:6px"></span>
+      <span style="font-size:.63rem;color:#888;margin-right:2px">↑</span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#0d9488;display:inline-block"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#5eead4;display:inline-block"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:#99f6e4;display:inline-block"></span>
+    </div>
+    <span id="inf-badge" style="font-size:.68rem;color:#8e44ad;margin-top:2px"></span>
   </div>
   <div class="sep"></div>
   <div class="cg">
@@ -870,13 +1068,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", default=os.path.join(OUTPUT_DIR, _PREFIX) if _PREFIX else OUTPUT_DIR)
+    parser.add_argument("--data-dir", default=os.path.join("data", _PREFIX) if _PREFIX else "data")
     args = parser.parse_args()
     out  = args.output_dir
+    data = args.data_dir
 
-    cite_path    = os.path.join(out, _pf("citation_edges_author.csv"))
-    author_path  = os.path.join(out, _pf("papers_by_author.csv"))
-    by_year_path = os.path.join(out, _pf("citation_edges_author_by_year.csv"))
+    cite_path    = os.path.join(data, _pf("citation_edges_author.csv"))
+    author_path  = os.path.join(data, _pf("papers_by_author.csv"))
+    by_year_path = os.path.join(data, _pf("citation_edges_author_by_year.csv"))
 
     print("Loading data…")
     cite_df   = pd.read_csv(cite_path)
@@ -890,7 +1090,7 @@ def main():
         print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
 
     # Load dominant subclass per author (optional — requires --fetch with subclasses config)
-    sc_path = os.path.join(out, _pf("papers_by_author_subclass.csv"))
+    sc_path = os.path.join(data, _pf("papers_by_author_subclass.csv"))
     author_subclass: dict = {}
     if os.path.exists(sc_path):
         sc_df = pd.read_csv(sc_path)
@@ -900,7 +1100,7 @@ def main():
         print(f"  Subclass data: {len(author_subclass)} authors with dominant subclass")
 
     # Load funder data per author (optional)
-    funders_path = os.path.join(out, _pf("funders_by_author.csv"))
+    funders_path = os.path.join(data, _pf("funders_by_author.csv"))
     author_funders: dict = {}
     if os.path.exists(funders_path):
         fdf = pd.read_csv(funders_path)
@@ -911,7 +1111,7 @@ def main():
                 author_funders[aid] = fs
         print(f"  Funder data: {len(author_funders)} authors with funding information")
 
-    papers_path = os.path.join(out, _pf("citation_edges_author_papers.csv"))
+    papers_path = os.path.join(data, _pf("citation_edges_author_papers.csv"))
     edge_papers_map: dict = {}
     if os.path.exists(papers_path):
         epdf = pd.read_csv(papers_path)
@@ -1103,7 +1303,8 @@ var TRACE_NODE        = 2;
 
     # Raw string — real JS braces, no Python escaping needed
     js_code = r"""
-var state = {search: '', egoIdx: -1, sizeMetric: 'indeg', yearFrom: null, yearTo: null};
+var state = {search: '', egoIdx: -1, sizeMetric: 'indeg', yearFrom: null, yearTo: null, zoomFactor: 1.0};
+var _initXRange = null;
 
 function computeOpacities() {
     var q = state.search.toLowerCase();
@@ -1135,7 +1336,9 @@ function computeEdgeTraces() {
 function render() {
     var d  = document.getElementById('net-plot');
     var op = computeOpacities();
-    var sz = state.sizeMetric === 'pagerank' ? NODE_SIZES_PR : NODE_SIZES_INDEG;
+    var baseSz = state.sizeMetric === 'pagerank' ? NODE_SIZES_PR : NODE_SIZES_INDEG;
+    var zf = state.zoomFactor;
+    var sz = zf === 1.0 ? baseSz : baseSz.map(function(s) { return Math.max(2, s * zf); });
     var ed = computeEdgeTraces();
     Plotly.restyle(d, {'marker.opacity': [op], 'marker.size': [sz]}, [TRACE_NODE]);
     Plotly.restyle(d, {x: [ed.nx], y: [ed.ny]}, [TRACE_EDGE_NORMAL]);
@@ -1218,6 +1421,25 @@ document.getElementById('net-plot').on('plotly_click', function(data) {
     if (!data || !data.points || !data.points.length) return;
     var pt = data.points[0];
     if (pt.curveNumber === TRACE_NODE) egoNetwork(pt.pointIndex);
+});
+document.getElementById('net-plot').on('plotly_afterplot', function() {
+    if (_initXRange) return;
+    var d = document.getElementById('net-plot');
+    if (d.layout && d.layout.xaxis && d.layout.xaxis.range) _initXRange = d.layout.xaxis.range.slice();
+});
+document.getElementById('net-plot').on('plotly_relayout', function(ev) {
+    var xlo = ev['xaxis.range[0]'], xhi = ev['xaxis.range[1]'];
+    if (xlo !== undefined && xhi !== undefined) {
+        if (_initXRange) {
+            var initSpan = _initXRange[1] - _initXRange[0];
+            var currSpan = xhi - xlo;
+            state.zoomFactor = (currSpan > 0 && initSpan > 0) ? initSpan / currSpan : 1.0;
+            render();
+        }
+    } else if (ev['xaxis.autorange'] === true) {
+        state.zoomFactor = 1.0;
+        render();
+    }
 });
 (function() {
     var authIn = document.getElementById('search-box');
@@ -1463,7 +1685,8 @@ var LAYOUT   = {layout_json};
 """
 
     js_code_full = r"""
-var state = {search: '', egoIdx: -1, sizeMetric: 'indeg', yearFrom: null, yearTo: null};
+var state = {search: '', egoIdx: -1, sizeMetric: 'indeg', yearFrom: null, yearTo: null, zoomFactor: 1.0};
+var _initXRange = null;
 
 function computeOpacities() {
     var q = state.search.toLowerCase(), ego = state.egoIdx, neighbors = null;
@@ -1489,7 +1712,9 @@ function computeEdgeTraces() {
 function render() {
     var d = document.getElementById('net-plot');
     var op = computeOpacities();
-    var sz = state.sizeMetric === 'pagerank' ? NODE_SIZES_PR : NODE_SIZES_INDEG;
+    var baseSz = state.sizeMetric === 'pagerank' ? NODE_SIZES_PR : NODE_SIZES_INDEG;
+    var zf = state.zoomFactor;
+    var sz = zf === 1.0 ? baseSz : baseSz.map(function(s) { return Math.max(2, s * zf); });
     var ed = computeEdgeTraces();
     Plotly.restyle(d, {'marker.opacity': [op], 'marker.size': [sz]}, [TRACE_NODE]);
     Plotly.restyle(d, {x: [ed.nx], y: [ed.ny]}, [TRACE_EDGE_NORMAL]);
@@ -1574,6 +1799,25 @@ document.getElementById('net-plot').on('plotly_click', function(data) {
     if (pt.curveNumber === TRACE_NODE) { egoNetwork(pt.pointIndex); openPanel(pt.pointIndex); }
 });
 document.getElementById('close-panel').addEventListener('click', function() { resetView(); });
+document.getElementById('net-plot').on('plotly_afterplot', function() {
+    if (_initXRange) return;
+    var d = document.getElementById('net-plot');
+    if (d.layout && d.layout.xaxis && d.layout.xaxis.range) _initXRange = d.layout.xaxis.range.slice();
+});
+document.getElementById('net-plot').on('plotly_relayout', function(ev) {
+    var xlo = ev['xaxis.range[0]'], xhi = ev['xaxis.range[1]'];
+    if (xlo !== undefined && xhi !== undefined) {
+        if (_initXRange) {
+            var initSpan = _initXRange[1] - _initXRange[0];
+            var currSpan = xhi - xlo;
+            state.zoomFactor = (currSpan > 0 && initSpan > 0) ? initSpan / currSpan : 1.0;
+            render();
+        }
+    } else if (ev['xaxis.autorange'] === true) {
+        state.zoomFactor = 1.0;
+        render();
+    }
+});
 (function() {
     var authIn = document.getElementById('search-box');
     var authDd = document.getElementById('search-dd');

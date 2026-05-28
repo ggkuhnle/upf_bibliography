@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bibliometric Analyses — G. Kuhnle</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --ink:    #1a2742;
+    --muted:  #556070;
+    --faint:  #8a96a3;
+    --rule:   #e2e6ea;
+    --bg:     #f4f6fb;
+    --card:   #ffffff;
+    --blue:   #2563eb;
+    --teal:   #0d9488;
+    --rose:   #db2777;
+    --violet: #7c3aed;
+    --amber:  #d97706;
+    --green:  #16a34a;
+    --navy:   #1e3a5f;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+  }
+
+  /* ── Header ── */
+  .site-header {
+    background: linear-gradient(135deg, #0f1f3d 0%, #1e3a5f 55%, #1a5276 100%);
+    color: #fff;
+    padding: 64px 24px 56px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .site-header::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 70% 40%, rgba(59,130,246,.18) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .site-header h1 {
+    font-size: clamp(1.6rem, 4vw, 2.6rem);
+    font-weight: 800;
+    letter-spacing: -.5px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .site-header .tagline {
+    font-size: 1.05rem;
+    opacity: .78;
+    max-width: 600px;
+    margin: 0 auto 32px;
+    position: relative;
+  }
+  .header-links {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    position: relative;
+  }
+  .hlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border-radius: 24px;
+    font-size: .85rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: opacity .15s, transform .15s;
+  }
+  .hlink:hover { opacity: .88; transform: translateY(-1px); }
+  .hlink-gh  { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3); }
+  .hlink-oa  { background: rgba(255,255,255,.10); color: #fff; border: 1px solid rgba(255,255,255,.2); }
+
+  /* ── Disclaimer ── */
+  .disclaimer {
+    background: #fff8e1;
+    border-top: 4px solid #f9a825;
+    border-bottom: 1px solid #f0d060;
+    padding: 13px 24px;
+    font-size: .85rem;
+    color: #4a3800;
+    line-height: 1.55;
+    text-align: center;
+  }
+  .disclaimer a { color: #4a3800; font-weight: 600; }
+
+  /* ── Main layout ── */
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  .section-label {
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--faint);
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--rule);
+  }
+
+  /* ── Analysis cards ── */
+  .analyses { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 22px; margin-bottom: 56px; }
+
+  .acard {
+    background: var(--card);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.07);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform .18s, box-shadow .18s;
+    text-decoration: none;
+    color: inherit;
+  }
+  .acard:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+
+  .acard-stripe { height: 6px; }
+  .acard-body   { padding: 22px 24px; flex: 1; }
+  .acard-icon   { font-size: 1.6rem; margin-bottom: 10px; display: block; }
+  .acard-body h2 { font-size: 1.05rem; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
+  .acard-body .scope {
+    display: inline-block;
+    font-size: .72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    padding: 2px 9px;
+    border-radius: 20px;
+    margin-bottom: 10px;
+    opacity: .85;
+  }
+  .acard-body p { font-size: .87rem; color: var(--muted); line-height: 1.55; }
+  .acard-body .tags {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
+  }
+  .tag {
+    font-size: .73rem;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--rule);
+  }
+  .acard-foot {
+    padding: 14px 24px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: .8rem;
+    color: var(--faint);
+  }
+  .acard-foot .arrow {
+    font-size: .9rem;
+    font-weight: 700;
+    color: var(--blue);
+    opacity: .7;
+    transition: opacity .15s, transform .15s;
+  }
+  .acard:hover .arrow { opacity: 1; transform: translateX(3px); }
+
+  /* colour variants */
+  .s-blue   { background: var(--blue); }
+  .s-teal   { background: var(--teal); }
+  .s-rose   { background: var(--rose); }
+  .s-violet { background: var(--violet); }
+  .s-amber  { background: var(--amber); }
+  .s-green  { background: var(--green); }
+  .scope-blue   { background: #dbeafe; color: #1d4ed8; }
+  .scope-teal   { background: #ccfbf1; color: #0f766e; }
+  .scope-rose   { background: #fce7f3; color: #9d174d; }
+  .scope-violet { background: #ede9fe; color: #5b21b6; }
+  .scope-amber  { background: #fef3c7; color: #92400e; }
+  .scope-green  { background: #dcfce7; color: #15803d; }
+
+  /* ── About section ── */
+  .about {
+    background: var(--card);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.07);
+    padding: 28px 32px;
+    margin-bottom: 56px;
+  }
+  .about h2 { font-size: 1rem; font-weight: 700; color: var(--ink); margin-bottom: 14px; }
+  .about p, .about li { font-size: .875rem; color: var(--muted); line-height: 1.65; }
+  .about ul { padding-left: 18px; margin-top: 8px; }
+  .about li { margin-bottom: 5px; }
+  .about code {
+    background: #f0f2f6; padding: 1px 6px; border-radius: 3px;
+    font-size: .82rem; font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .about a { color: var(--blue); text-decoration: none; }
+  .about a:hover { text-decoration: underline; }
+  .about .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 0; }
+  @media (max-width: 600px) { .about .grid2 { grid-template-columns: 1fr; } }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 28px 24px;
+    font-size: .78rem;
+    color: var(--faint);
+    border-top: 1px solid var(--rule);
+  }
+  footer a { color: var(--faint); text-decoration: none; }
+  footer a:hover { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <h1>Bibliometric Analyses</h1>
+  <p class="tagline">Open, automated literature analyses built on <a href="https://openalex.org" style="color:#93c5fd" target="_blank">OpenAlex</a>. Each topic retrieves all indexed papers, then maps the research landscape by institution, country, funder, and citation network.</p>
+  <div class="header-links">
+    <a class="hlink hlink-gh" href="https://github.com/ggkuhnle/upf_bibliography" target="_blank">
+      <!-- github icon -->
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      Source code
+    </a>
+    <a class="hlink hlink-oa" href="https://openalex.org" target="_blank">OpenAlex API</a>
+  </div>
+</header>
+
+<div class="disclaimer">
+  <strong>Disclaimer:</strong> Automatically generated bibliometric data retrieved from <a href="https://openalex.org" target="_blank">OpenAlex</a>. Does not represent the views of any individual, institution, or organisation. Data may contain errors or omissions inherent to automated retrieval.
+</div>
+
+<main>
+
+  <!-- ═══════════════════════════════════════════════════
+       ANALYSES  — add a new <a class="acard"> block here
+       to register a new topic. Copy any existing card,
+       change the href, title, description, and tags.
+  ════════════════════════════════════════════════════════ -->
+  <p class="section-label">Topics</p>
+  <div class="analyses">
+
+    <!-- ── Ultra-processed food ── -->
+    <a class="acard" href="upf/">
+      <div class="acard-stripe s-rose"></div>
+      <div class="acard-body">
+        <span class="acard-icon">🍔</span>
+        <span class="scope scope-rose">Nutrition</span>
+        <h2>Ultra-processed Food</h2>
+        <p>All indexed papers on ultra-processed food (NOVA classification). Covers health outcomes, epidemiology, policy, and processing science.</p>
+        <div class="tags">
+          <span class="tag">NOVA</span><span class="tag">UPF</span><span class="tag">Diet</span><span class="tag">Epidemiology</span>
+        </div>
+      </div>
+      <div class="acard-foot">
+        <span>upf/</span>
+        <span class="arrow">→</span>
+      </div>
+    </a>
+
+    <!-- ── Flavonoids ── -->
+    <a class="acard" href="flavonoids/">
+      <div class="acard-stripe s-violet"></div>
+      <div class="acard-body">
+        <span class="acard-icon">🍇</span>
+        <span class="scope scope-violet">Phytochemistry</span>
+        <h2>Flavonoids</h2>
+        <p>Broad literature on flavonoids — the largest polyphenol class found in fruits, vegetables, tea, and wine. Includes all sub-classes.</p>
+        <div class="tags">
+          <span class="tag">Polyphenols</span><span class="tag">Bioavailability</span><span class="tag">Health effects</span>
+        </div>
+      </div>
+      <div class="acard-foot">
+        <span>flavonoids/</span>
+        <span class="arrow">→</span>
+      </div>
+    </a>
+
+    <!-- ── Flavanols ── -->
+    <a class="acard" href="flavanol/">
+      <div class="acard-stripe s-amber"></div>
+      <div class="acard-body">
+        <span class="acard-icon">☕</span>
+        <span class="scope scope-amber">Phytochemistry</span>
+        <h2>Flavanols</h2>
+        <p>Papers specifically on flavanols and flavan-3-ols.</p>
+        <div class="tags">
+          <span class="tag">Flavanols</span>
+        </div>
+      </div>
+      <div class="acard-foot">
+        <span>flavanol/</span>
+        <span class="arrow">→</span>
+      </div>
+    </a>
+
+    <!-- ── Cocoa flavanols ── -->
+    <a class="acard" href="cf/">
+      <div class="acard-stripe s-amber"></div>
+      <div class="acard-body">
+        <span class="acard-icon">🤎</span>
+        <span class="scope scope-amber">Phytochemistry</span>
+        <h2>Cocoa Flavanols</h2>
+	<p>Papers specifically on cocoa flavanols and flavan-3-ols</p>
+        <div class="tags">
+          <span class="tag">Cocoa</span><span class="tag">Flavanols</span>
+        </div>
+      </div>
+      <div class="acard-foot">
+        <span>cf/</span>
+        <span class="arrow">→</span>
+      </div>
+    </a>
+
+    <!-- ══════════════════════════════════════════════════
+         ADD NEW TOPICS BELOW — copy a card block above,
+         update href / icon / scope / title / description /
+         tags / folder path, then save and redeploy.
+    ═══════════════════════════════════════════════════════
+
+    <a class="acard" href="new-topic/">
+      <div class="acard-stripe s-green"></div>
+      <div class="acard-body">
+        <span class="acard-icon">🌿</span>
+        <span class="scope scope-green">Category</span>
+        <h2>New Topic</h2>
+        <p>Brief description of what this analysis covers.</p>
+        <div class="tags">
+          <span class="tag">Keyword 1</span><span class="tag">Keyword 2</span>
+        </div>
+      </div>
+      <div class="acard-foot">
+        <span>misc/new-topic/</span>
+        <span class="arrow">→</span>
+      </div>
+    </a>
+
+    ═══════════════════════════════════════════════════ -->
+
+  </div>
+  <!-- end .analyses -->
+
+
+  <!-- ── About ── -->
+  <p class="section-label">About this project</p>
+  <div class="about">
+    <div class="grid2">
+      <div>
+        <h2>What these pages show</h2>
+        <p>Each analysis automatically retrieves all papers matching a set of search terms from <a href="https://openalex.org" target="_blank">OpenAlex</a>, then produces:</p>
+        <ul>
+          <li>Publication trends by year, country, and institution</li>
+          <li>Co-authorship and citation networks</li>
+          <li>Study-type classification (RCT, cohort, review, …)</li>
+          <li>Funder landscape and geographic distribution</li>
+        </ul>
+      </div>
+      <div>
+        <h2>How it works</h2>
+        <p>The pipeline is fully open source. Set keywords in <code>config.json</code>, then run:</p>
+        <ul>
+          <li><code>python bibliometrics.py</code> — fetch &amp; process</li>
+          <li><code>python make_dashboard.py</code> — build dashboards</li>
+          <li><code>./deploy.sh</code> — push to server</li>
+        </ul>
+        <p style="margin-top:10px">See the <a href="https://github.com/ggkuhnle/upf_bibliography" target="_blank">GitHub repository</a> for full documentation and source code.</p>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  Data: <a href="https://openalex.org" target="_blank">OpenAlex</a> &nbsp;·&nbsp;
+  Code: <a href="https://github.com/ggkuhnle/upf_bibliography" target="_blank">github.com/ggkuhnle/upf_bibliography</a> &nbsp;·&nbsp;
+  G. Kuhnle, University of Reading
+</footer>
+
+</body>
+</html>

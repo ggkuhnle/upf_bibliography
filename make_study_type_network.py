@@ -26,6 +26,7 @@ def _args():
     p.add_argument("--primary", action="store_true",
                    help="Use first↔last-author edges (filters honorary middle authors)")
     p.add_argument("--output-dir", default="output")
+    p.add_argument("--data-dir", default="data")
     return p.parse_args()
 
 _ARGS = _args()
@@ -43,9 +44,10 @@ _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
     """Apply topic prefix to a filename."""
-    return f"{_PREFIX}_{name}" if _PREFIX else name
+    return name
 
-OUTPUT_DIR  = _ARGS.output_dir
+OUTPUT_DIR  = _ARGS.output_dir if _ARGS.output_dir != "output" else (os.path.join("output", _PREFIX) if _PREFIX else "output")
+DATA_DIR    = _ARGS.data_dir if _ARGS.data_dir != "data" else (os.path.join("data", _PREFIX) if _PREFIX else "data")
 _suffix     = "_primary" if _ARGS.primary else ""
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, _pf(f"network_study_type{_suffix}.html"))
 MIN_PAPERS  = 1
@@ -68,11 +70,11 @@ ST_INDEX = {s["name"]: i for i, s in enumerate(ST_STYLES)}
 print("Loading data…" + (" [primary-author mode]" if _ARGS.primary else ""))
 _e  = _pf("coauthorship_edges_primary.csv")         if _ARGS.primary else _pf("coauthorship_edges.csv")
 _ey = _pf("coauthorship_edges_by_year_primary.csv") if _ARGS.primary else _pf("coauthorship_edges_by_year.csv")
-edges_df    = pd.read_csv(os.path.join(OUTPUT_DIR, _e))
-authors_df  = pd.read_csv(os.path.join(OUTPUT_DIR, _pf("papers_by_author.csv")))
-edges_yr_df = pd.read_csv(os.path.join(OUTPUT_DIR, _ey))
+edges_df    = pd.read_csv(os.path.join(DATA_DIR, _e))
+authors_df  = pd.read_csv(os.path.join(DATA_DIR, _pf("papers_by_author.csv")))
+edges_yr_df = pd.read_csv(os.path.join(DATA_DIR, _ey))
 
-author_st_path = os.path.join(OUTPUT_DIR, _pf("papers_by_author_study_type.csv"))
+author_st_path = os.path.join(DATA_DIR, _pf("papers_by_author_study_type.csv"))
 if not os.path.exists(author_st_path):
     print(f"Missing {author_st_path} — run bibliometrics.py first.")
     raise SystemExit(1)

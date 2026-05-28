@@ -31,7 +31,7 @@ _TITLE  = _CFG.get("title", "Research")
 
 def _pf(name):
     """Apply topic prefix to a filename."""
-    return f"{_PREFIX}_{name}" if _PREFIX else name
+    return name
 
 DISCLAIMER = (
     '<div style="background:#fff8e1;border-top:4px solid #f9a825;'
@@ -248,11 +248,14 @@ def build_html(st_df: pd.DataFrame, st_year_df: pd.DataFrame) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", default=os.path.join(OUTPUT_DIR, _PREFIX) if _PREFIX else OUTPUT_DIR)
+    parser.add_argument("--data-dir", default=os.path.join("data", _PREFIX) if _PREFIX else "data")
     args = parser.parse_args()
+    out = args.output_dir
+    data = args.data_dir
 
-    st_path      = os.path.join(args.output_dir, _pf("papers_by_study_type.csv"))
-    st_year_path = os.path.join(args.output_dir, _pf("papers_by_study_type_year.csv"))
+    st_path      = os.path.join(data, _pf("papers_by_study_type.csv"))
+    st_year_path = os.path.join(data, _pf("papers_by_study_type_year.csv"))
 
     for p in (st_path, st_year_path):
         if not os.path.exists(p):
@@ -264,8 +267,8 @@ def main() -> None:
 
     html = build_html(st_df, st_year_df)
 
-    out_path = os.path.join(args.output_dir, _pf("study_type.html"))
-    os.makedirs(args.output_dir, exist_ok=True)
+    out_path = os.path.join(out, _pf("study_type.html"))
+    os.makedirs(out, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     print(f"Written → {out_path}  ({os.path.getsize(out_path)//1024} KB)")

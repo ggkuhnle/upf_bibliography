@@ -43,11 +43,12 @@ PREFIX = _CFG.get("prefix", "")
 
 def _pf(name):
     """Apply topic prefix to a filename."""
-    return f"{PREFIX}_{name}" if PREFIX else name
+    return name
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--output-dir", default="output")
+    p.add_argument("--output-dir", default=os.path.join("output", PREFIX) if PREFIX else "output")
+    p.add_argument("--data-dir", default=os.path.join("data", PREFIX) if PREFIX else "data")
     p.add_argument("--fetch", action="store_true",
                    help="Run bibliometrics.py first to update CSVs, then rebuild charts.")
     return p.parse_args()
@@ -106,28 +107,28 @@ DISCLAIMER = (
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 
-def load_data(out):
+def load_data(out, data):
     print("Loading CSVs…")
-    edges_df       = pd.read_csv(os.path.join(out, _pf("coauthorship_edges.csv")))
-    authors_df     = pd.read_csv(os.path.join(out, _pf("papers_by_author.csv")))
-    institutions_df = pd.read_csv(os.path.join(out, _pf("papers_by_institution.csv")))
+    edges_df       = pd.read_csv(os.path.join(data, _pf("coauthorship_edges.csv")))
+    authors_df     = pd.read_csv(os.path.join(data, _pf("papers_by_author.csv")))
+    institutions_df = pd.read_csv(os.path.join(data, _pf("papers_by_institution.csv")))
     institutions_df = institutions_df[
         institutions_df["institution"].notna() & (institutions_df["institution"] != "")
     ].copy()
 
     try:
-        funders_df      = pd.read_csv(os.path.join(out, _pf("papers_by_funder.csv")))
-        funding_cty_df  = pd.read_csv(os.path.join(out, _pf("funding_by_country.csv")))
-        dept_df         = pd.read_csv(os.path.join(out, _pf("papers_by_department.csv")))
+        funders_df      = pd.read_csv(os.path.join(data, _pf("papers_by_funder.csv")))
+        funding_cty_df  = pd.read_csv(os.path.join(data, _pf("funding_by_country.csv")))
+        dept_df         = pd.read_csv(os.path.join(data, _pf("papers_by_department.csv")))
     except FileNotFoundError:
         funders_df = funding_cty_df = dept_df = pd.DataFrame()
         print("  ⚠  Funding/department CSVs not found")
 
-    year_df         = pd.read_csv(os.path.join(out, _pf("papers_by_year.csv")))
-    country_year_df = pd.read_csv(os.path.join(out, _pf("papers_by_country_year.csv")))
-    net_metrics_df  = pd.read_csv(os.path.join(out, _pf("network_metrics_by_year.csv")))
-    edges_yr_df     = pd.read_csv(os.path.join(out, _pf("coauthorship_edges_by_year.csv")))
-    country_df      = pd.read_csv(os.path.join(out, _pf("papers_by_country.csv")))
+    year_df         = pd.read_csv(os.path.join(data, _pf("papers_by_year.csv")))
+    country_year_df = pd.read_csv(os.path.join(data, _pf("papers_by_country_year.csv")))
+    net_metrics_df  = pd.read_csv(os.path.join(data, _pf("network_metrics_by_year.csv")))
+    edges_yr_df     = pd.read_csv(os.path.join(data, _pf("coauthorship_edges_by_year.csv")))
+    country_df      = pd.read_csv(os.path.join(data, _pf("papers_by_country.csv")))
     country_df      = country_df[country_df["country"].notna() & (country_df["country"] != "")].copy()
 
     # Clip temporal data to 2000+
@@ -142,12 +143,12 @@ def load_data(out):
         ("papers_by_study_type_year.csv",   "st_year_df"),
         ("papers_by_author_study_type.csv", "st_auth_df"),
     ]:
-        path = os.path.join(out, name)
+        path = os.path.join(data, name)
         if os.path.exists(path):
             locals()[attr]  # just to reference it
-    _st_path      = os.path.join(out, _pf("papers_by_study_type.csv"))
-    _st_year_path = os.path.join(out, _pf("papers_by_study_type_year.csv"))
-    _st_auth_path = os.path.join(out, _pf("papers_by_author_study_type.csv"))
+    _st_path      = os.path.join(data, _pf("papers_by_study_type.csv"))
+    _st_year_path = os.path.join(data, _pf("papers_by_study_type_year.csv"))
+    _st_auth_path = os.path.join(data, _pf("papers_by_author_study_type.csv"))
     if os.path.exists(_st_path):
         st_df      = pd.read_csv(_st_path)
         st_year_df = pd.read_csv(_st_year_path)
@@ -158,9 +159,9 @@ def load_data(out):
 
     # Subclass CSVs (optional — only present when config has "subclasses")
     subclass_df = subclass_year_df = subclass_auth_df = None
-    _sc_path      = os.path.join(out, _pf("papers_by_subclass.csv"))
-    _sc_yr_path   = os.path.join(out, _pf("papers_by_subclass_year.csv"))
-    _sc_auth_path = os.path.join(out, _pf("papers_by_author_subclass.csv"))
+    _sc_path      = os.path.join(data, _pf("papers_by_subclass.csv"))
+    _sc_yr_path   = os.path.join(data, _pf("papers_by_subclass_year.csv"))
+    _sc_auth_path = os.path.join(data, _pf("papers_by_author_subclass.csv"))
     if os.path.exists(_sc_path):
         subclass_df      = pd.read_csv(_sc_path)
         subclass_year_df = pd.read_csv(_sc_yr_path) if os.path.exists(_sc_yr_path) else None
@@ -1463,13 +1464,14 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
 def main():
     args = parse_args()
     out  = args.output_dir
+    data = args.data_dir
 
     if args.fetch:
         here = os.path.dirname(__file__)
         script = os.path.join(here, "bibliometrics.py")
         print(f"Fetching data (bibliometrics.py) …")
         result = subprocess.run(
-            [sys.executable, script, "--output-dir", out],
+            [sys.executable, script, "--output-dir", data],
             check=False,
         )
         if result.returncode != 0:
@@ -1488,7 +1490,8 @@ def main():
     ]:
         print(f"{label} ({script_name}) …")
         result = subprocess.run(
-            [sys.executable, os.path.join(here, script_name), "--output-dir", out],
+            [sys.executable, os.path.join(here, script_name),
+             "--output-dir", out, "--data-dir", data],
             check=False,
         )
         if result.returncode != 0:
@@ -1497,7 +1500,7 @@ def main():
     (edges_df, authors_df, institutions_df, funders_df, funding_cty_df,
      dept_df, year_df, country_year_df, net_metrics_df, edges_yr_df,
      country_df, st_df, st_year_df, st_auth_df,
-     subclass_df, subclass_year_df, _subclass_auth_df) = load_data(out)
+     subclass_df, subclass_year_df, _subclass_auth_df) = load_data(out, data)
 
     G, G_lcc, node_attrs = build_graph(edges_df, authors_df)
     centrality_df        = compute_centrality(G_lcc)
@@ -1505,7 +1508,7 @@ def main():
     G_plot, pos          = compute_layout(G_lcc)
 
     # Save centrality CSV
-    cent_path = os.path.join(out, _pf("author_centrality.csv"))
+    cent_path = os.path.join(data, _pf("author_centrality.csv"))
     cols = ["author_id","name","institution","country","community",
             "papers","degree","degree_centrality","betweenness","pagerank","clustering"]
     centrality_df[cols].sort_values("betweenness", ascending=False).to_csv(cent_path, index=False)
