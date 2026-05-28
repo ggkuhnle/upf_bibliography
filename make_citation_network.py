@@ -1117,15 +1117,7 @@ def main():
         print(f"  Funder data: {len(author_funders)} authors with funding information")
 
     papers_path = os.path.join(data, _pf("citation_edges_author_papers.csv"))
-    edge_papers_map: dict = {}
-    if os.path.exists(papers_path):
-        epdf = pd.read_csv(papers_path)
-        for _, row in epdf.iterrows():
-            ca = row.get("citing_author_id"); cd = row.get("cited_author_id")
-            ts = str(row.get("citing_titles") or "")
-            if ca and cd and ts and ts != "nan":
-                edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
-        print(f"  Edge-papers data loaded: {len(edge_papers_map):,} edges with title data")
+    edge_papers_map: dict = {}  # populated later, after node_set is known
 
     # ── Author lookup ─────────────────────────────────────────────────────────
     author_lookup = {}
@@ -1173,6 +1165,17 @@ def main():
         print(f"  Year-annotated edges after filter: {len(year_df):,} rows")
     else:
         print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
+
+    if os.path.exists(papers_path):
+        print("  Loading edge-papers data (filtered to plot nodes)…")
+        epdf = pd.read_csv(papers_path)
+        epdf = epdf[epdf["citing_author_id"].isin(node_set) & epdf["cited_author_id"].isin(node_set)]
+        for _, row in epdf.iterrows():
+            ca = row.get("citing_author_id"); cd = row.get("cited_author_id")
+            ts = str(row.get("citing_titles") or "")
+            if ca and cd and ts and ts != "nan":
+                edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
+        print(f"  Edge-papers after filter: {len(edge_papers_map):,} edges with title data")
 
     G_undirected = G_plot.to_undirected()
 

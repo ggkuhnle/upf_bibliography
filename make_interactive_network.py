@@ -186,7 +186,7 @@ html = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UPF Co-authorship Network Explorer</title>
+<title>{_TITLE} — Co-authorship Network Explorer</title>
 <script src="https://cdn.plot.ly/plotly-3.5.0.min.js" charset="utf-8"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -235,7 +235,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgro
 <body>
 <div id="hdr">
   <div>
-    <h1>UPF Co-authorship Network</h1>
+    <h1>{_TITLE} — Co-authorship Network</h1>
     <p>Ultra-processed food literature · OpenAlex</p>
   </div>
   <div class="spacer"></div>
@@ -464,7 +464,7 @@ function refreshPanel(idx) {{
   const rows = [
     ['Institution', n.inst || '—'],
     ['Country',     n.ctr  || '—'],
-    ['Papers (UPF)', n.pap],
+    ['Papers', n.pap],
     ['Citations',   n.cit.toLocaleString()],
     ['Co-authors (network)', Object.keys(adj[idx]).length],
   ];
