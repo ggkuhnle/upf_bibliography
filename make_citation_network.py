@@ -496,6 +496,7 @@ var CY_STYLE = [
   {selector:'node.inf-up2',  style:{'border-width':2,'border-color':'#5eead4','z-index':100}},
   {selector:'node.inf-up3',  style:{'border-width':1.5,'border-color':'#99f6e4','z-index':90}},
   {selector:'node.inf-faded',style:{'opacity':0.05}},
+  {selector:'edge.inf-faded',style:{'opacity':0.04}},
   {selector:'edge', style:{
     'width':'data(width)',
     'line-color':'rgba(120,120,120,0.3)',
@@ -591,7 +592,7 @@ var _infDir   = 'down';
 
 function setInfluenceDepth(d) {
   _infDepth = d;
-  [1,2,3].forEach(function(n){
+  [0,1,2,3].forEach(function(n){
     document.getElementById('inf-d'+n).classList.toggle('active', n===d);
   });
   exploreInfluence();
@@ -606,7 +607,7 @@ function setInfluenceDir(dir) {
 
 function exploreInfluence() {
   var q = document.getElementById('inf-in').value.trim().toLowerCase();
-  cy.nodes().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
+  cy.elements().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
   var badge = document.getElementById('inf-badge');
   if (q.length < 2) { badge.textContent = ''; return; }
 
@@ -637,7 +638,7 @@ function exploreInfluence() {
     frontier = next;
   }
 
-  // Apply classes — downstream (purple) vs upstream (teal)
+  // Apply node classes — downstream (purple) vs upstream (teal)
   var pfx = _infDir === 'down' ? 'dn' : 'up';
   var counts = [0,0,0,0];
   cy.nodes().forEach(function(n){
@@ -648,6 +649,13 @@ function exploreInfluence() {
     else if (d===1) n.addClass('inf-'+pfx+'1');
     else if (d===2) n.addClass('inf-'+pfx+'2');
     else            n.addClass('inf-'+pfx+'3');
+  });
+
+  // Fade edges where either endpoint is faded
+  cy.edges().forEach(function(e){
+    if (e.source().hasClass('inf-faded') || e.target().hasClass('inf-faded')) {
+      e.addClass('inf-faded');
+    }
   });
 
   var label = _infDir === 'down' ? 'citing' : 'cited';
@@ -661,7 +669,7 @@ function exploreInfluence() {
 function clearInfluence() {
   document.getElementById('inf-in').value = '';
   document.getElementById('inf-badge').textContent = '';
-  cy.nodes().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
+  cy.elements().removeClass('inf-seed inf-dn1 inf-dn2 inf-dn3 inf-up1 inf-up2 inf-up3 inf-faded');
 }
 
 function toggleNeighborsOnly() {
@@ -965,14 +973,15 @@ document.addEventListener('DOMContentLoaded', function() {
       <span style="font-size:.68rem;color:#888;white-space:nowrap">Direction:</span>
       <div class="btn-grp">
         <button id="inf-dir-down" class="tog active" onclick="setInfluenceDir('down')"
-                title="Who cites the seed — work the seed influenced">&#8595; influenced</button>
+                title="Downstream: find papers that CITE the seed — the seed influenced these">seed &#8594; field</button>
         <button id="inf-dir-up"   class="tog"        onclick="setInfluenceDir('up')"
-                title="Who the seed cites — work that shaped the seed">&#8593; influencers</button>
+                title="Upstream: find papers the seed CITES — these influenced the seed">field &#8594; seed</button>
       </div>
     </div>
     <div style="display:flex;gap:4px;margin-top:4px;align-items:center">
       <span style="font-size:.68rem;color:#888">Depth:</span>
       <div class="btn-grp">
+        <button id="inf-d0" class="tog"        onclick="setInfluenceDepth(0)" title="Seed only — no expansion">0</button>
         <button id="inf-d1" class="tog active" onclick="setInfluenceDepth(1)">1</button>
         <button id="inf-d2" class="tog"        onclick="setInfluenceDepth(2)">2</button>
         <button id="inf-d3" class="tog"        onclick="setInfluenceDepth(3)">3</button>
