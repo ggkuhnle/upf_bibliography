@@ -1160,22 +1160,24 @@ def main():
     node_set = set(G_plot.nodes())
 
     if has_year_data:
-        print("  Loading year-annotated edges (filtered to plot nodes)…")
-        year_df = pd.read_csv(by_year_path)
-        year_df = year_df[year_df["citing_author_id"].isin(node_set) & year_df["cited_author_id"].isin(node_set)]
+        print("  Loading year-annotated edges (chunked, filtered to plot nodes)…")
+        chunks = []
+        for chunk in pd.read_csv(by_year_path, chunksize=500_000):
+            chunks.append(chunk[chunk["citing_author_id"].isin(node_set) & chunk["cited_author_id"].isin(node_set)])
+        year_df = pd.concat(chunks, ignore_index=True) if chunks else None
         print(f"  Year-annotated edges after filter: {len(year_df):,} rows")
     else:
         print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
 
     if os.path.exists(papers_path):
-        print("  Loading edge-papers data (filtered to plot nodes)…")
-        epdf = pd.read_csv(papers_path)
-        epdf = epdf[epdf["citing_author_id"].isin(node_set) & epdf["cited_author_id"].isin(node_set)]
-        for _, row in epdf.iterrows():
-            ca = row.get("citing_author_id"); cd = row.get("cited_author_id")
-            ts = str(row.get("citing_titles") or "")
-            if ca and cd and ts and ts != "nan":
-                edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
+        print("  Loading edge-papers data (chunked, filtered to plot nodes)…")
+        for chunk in pd.read_csv(papers_path, chunksize=500_000):
+            chunk = chunk[chunk["citing_author_id"].isin(node_set) & chunk["cited_author_id"].isin(node_set)]
+            for _, row in chunk.iterrows():
+                ca = row.get("citing_author_id"); cd = row.get("cited_author_id")
+                ts = str(row.get("citing_titles") or "")
+                if ca and cd and ts and ts != "nan":
+                    edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
         print(f"  Edge-papers after filter: {len(edge_papers_map):,} edges with title data")
 
     G_undirected = G_plot.to_undirected()
