@@ -20,6 +20,8 @@ notebooks/*.html
 # Logs & temp
 logs/
 *.log
+*.jsonl
+*.cursor
 
 # OS
 .DS_Store

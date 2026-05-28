@@ -1,6 +1,7 @@
 requests
 pandas
-matplotlib
+numpy
 networkx
 plotly
+kaleido
 python-louvain
