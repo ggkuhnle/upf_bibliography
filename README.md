@@ -3,7 +3,7 @@
 A configurable, open bibliometric analysis pipeline built on [OpenAlex](https://openalex.org).
 Point it at any set of search terms and it produces a full suite of interactive dashboards:
 publication trends, country and institution rankings, author networks, study-type breakdown,
-journal analysis, and a world map — all as self-contained HTML files.
+journal analysis, a world map, and a citation network explorer — all as self-contained HTML files.
 
 **→ [Live example: Ultra-Processed Food Research](https://ggkuhnle.github.io/upf_bibliography/)**
 
@@ -22,11 +22,12 @@ Edit `config.json` to set your topic, then run:
 
 ```bash
 python make_dashboard.py --fetch
-open output/index.html
 ```
 
-`--fetch` retrieves data from OpenAlex before building the dashboards.
-Omit it on subsequent runs to rebuild the HTML from already-downloaded CSVs.
+`--fetch` retrieves data from OpenAlex before building all dashboards.
+Omit it on subsequent runs to rebuild the HTML from already-downloaded data.
+
+Output lands in `output/{prefix}/index.html`.
 
 ---
 
@@ -50,12 +51,12 @@ All topic-specific settings live in `config.json`:
 | Field | Purpose |
 |-------|---------|
 | `title` | Human-readable label used in dashboard headings |
-| `prefix` | Short string prepended to every output file (`upf_dashboard.html`, `upf_papers_by_year.csv`, …). Lets multiple topics share one `output/` directory without collisions. |
-| `keywords` | Search terms sent to OpenAlex `title_and_abstract.search`. Multi-word phrases are quoted and matched exactly; single words are stemmed by OpenAlex (so `flavanol` also matches `flavanols`). Terms are OR-combined. |
+| `prefix` | Short identifier used as the output subfolder name (`output/upf/`, `data/upf/`) |
+| `keywords` | Search terms sent to OpenAlex `title_and_abstract.search`. Multi-word phrases are matched exactly; single words are stemmed by OpenAlex. Terms are OR-combined. |
 
 ### Multi-topic use
 
-Switch configs to analyse a different topic without losing existing data:
+Save per-topic configs alongside `config.json` and swap as needed:
 
 ```bash
 cp config.json config.json.upf         # save current topic
@@ -63,38 +64,93 @@ cp config.json.flav config.json        # switch to flavanols
 python make_dashboard.py --fetch
 ```
 
-Because every output file carries the prefix, the two datasets coexist in `output/`.
+Each topic gets its own isolated subdirectory — `data/flavanol/` for raw data,
+`output/flavanol/` for generated HTML — so multiple topics coexist without collisions.
+
+---
+
+## Directory layout
+
+```
+upf_bibliography/
+├── config.json                       # active topic config
+├── config.json.upf                   # saved configs for each topic
+├── config.json.flav
+├── config.json.flavonoid
+├── config.json.cocoa
+│
+├── bibliometrics.py                  # data retrieval from OpenAlex
+├── make_dashboard.py                 # main entry point — builds all dashboards
+├── make_citation_network.py          # citation network + Cytoscape explorer
+├── make_interactive_network.py       # co-authorship network explorer
+├── make_world_map.py                 # world map (HTML + PNG)
+├── make_study_type_dashboard.py      # study-type charts
+├── make_study_type_network.py        # study-type co-authorship network
+├── make_journal_dashboard.py         # journal analysis
+│
+├── deploy.sh                         # rsync to web server
+├── server_index.html                 # landing page for all topics on the server
+├── requirements.txt
+│
+├── data/                             # downloaded data — not git-tracked
+│   ├── upf/
+│   ├── flavanol/
+│   ├── flavonoid/
+│   └── cf/
+│
+└── output/                           # generated HTML and PNG — not git-tracked
+    ├── upf/
+    ├── flavanol/
+    ├── flavonoid/
+    └── cf/
+```
 
 ---
 
 ## Dashboards produced
 
+All files are written to `output/{prefix}/`:
+
 | File | Description |
 |------|-------------|
-| `output/index.html` | Landing page with live stats and links to all dashboards |
-| `output/<prefix>_dashboard.html` | Main overview: country/institution/author rankings, temporal trends, network metrics, author position analysis, study-type breakdown |
-| `output/<prefix>_network_interactive.html` | Interactive co-authorship network explorer (year slider, author search, community colours) |
-| `output/<prefix>_world_map.html` | Institution-level bubble map; PNG version also written |
-| `output/<prefix>_study_type.html` | Study-type breakdown: donut chart and stacked bar (2000–2024) |
-| `output/<prefix>_network_study_type.html` | Co-authorship network with nodes coloured/shaped by dominant study type |
-| `output/<prefix>_journal_dashboard.html` | Journal analysis: top journals, impact vs volume, study-type mix, publication trends |
+| `index.html` | Landing page with live stats and links to all dashboards |
+| `dashboard.html` | Main overview: country/institution/author rankings, temporal trends, network metrics, author position analysis, study-type breakdown |
+| `citation_network_cytoscape.html` | Citation network explorer: BFS influence tracing, funder highlighting, author/funder autocomplete search, shortest-path finder |
+| `network_interactive.html` | Interactive co-authorship network (year slider, author search, community colours) |
+| `world_map.html` | Institution-level bubble map; PNG version also written |
+| `study_type.html` | Study-type breakdown: donut chart and stacked bar (2000–present) |
+| `network_study_type.html` | Co-authorship network with nodes coloured by dominant study type |
+| `journal_dashboard.html` | Journal analysis: top journals, impact vs volume, study-type mix, publication trends |
 
 ---
 
 ## Scripts
 
+### `make_dashboard.py` — main entry point
+
+Builds the main dashboard and `index.html`. With `--fetch` it first calls `bibliometrics.py`
+to download data, then runs all other `make_*.py` scripts automatically.
+
+```bash
+python make_dashboard.py              # rebuild HTML from existing data
+python make_dashboard.py --fetch      # fetch data then build everything
+```
+
+All other `make_*.py` scripts can also be run individually if you only need to regenerate one dashboard.
+
+---
+
 ### `bibliometrics.py` — data retrieval
 
 Queries OpenAlex using the keywords from `config.json`. Handles cursor pagination,
-rate limiting, and retries. Writes all CSV tables to `output/`.
+rate limiting, and retries. Writes all CSV tables to `data/{prefix}/`.
 
 ```bash
-python bibliometrics.py                       # default output dir: output/
-python bibliometrics.py --output-dir results  # custom dir
-python bibliometrics.py --dry-run             # first 2 pages only (testing)
+python bibliometrics.py               # default: data/{prefix}/
+python bibliometrics.py --dry-run     # first 2 pages only (testing)
 ```
 
-**Outputs** (all prefixed):
+**Outputs** (written to `data/{prefix}/`):
 
 | CSV | Contents |
 |-----|----------|
@@ -109,14 +165,16 @@ python bibliometrics.py --dry-run             # first 2 pages only (testing)
 | `papers_by_journal_study_type.csv` | Journal × study-type matrix |
 | `papers_by_study_type.csv` | Overall study-type distribution |
 | `papers_by_study_type_year.csv` | Study-type × year matrix |
-| `papers_by_department.csv` | Departmental affiliation strings (experimental) |
 | `papers_by_funder.csv` | Funder names and paper counts |
 | `funding_by_country.csv` | Funding coverage per country |
+| `papers_by_department.csv` | Departmental affiliation strings (experimental) |
 | `coauthorship_edges.csv` | All-time co-authorship edge list |
 | `coauthorship_edges_by_year.csv` | Edge list with year annotation |
 | `coauthorship_edges_primary.csv` | First/last-author-only edges |
 | `coauthorship_edges_by_year_primary.csv` | Primary edges with year annotation |
 | `network_metrics_by_year.csv` | Annual network size, density, clustering |
+| `citation_edges_author.csv` | Author-level citation graph |
+| `funders_by_author.csv` | Per-author funder strings |
 
 **Study-type classification** uses three sources in priority order:
 1. PubMed MeSH publication-type tags (most reliable; covers ~65–70 % of papers)
@@ -125,86 +183,49 @@ python bibliometrics.py --dry-run             # first 2 pages only (testing)
 
 Categories: `RCT`, `Clinical Trial`, `Observational`, `Systematic Review / Meta-analysis`, `Review`, `Other`.
 
-**Institution assignment** uses the most frequently recorded affiliation across all of an author's papers rather than a single paper's affiliation, reducing mis-attribution from occasional guest or historical affiliations.
+---
+
+### `make_citation_network.py` — citation network explorer
+
+Builds a Cytoscape.js-based citation network with:
+- Node sizing by PageRank or in-degree; community detection
+- **Influence explorer**: enter an author or funder, BFS traces downstream (who they influenced) or upstream (who influenced them) up to 3 hops, colour-coded by direction and depth
+- **Funder highlight**: highlight all authors funded by a given organisation
+- **Shortest path** between any two authors
+- Autocomplete on all search boxes (authors with institution sub-label; funders with badge)
+- CSV export of the visible network
 
 ---
 
-### `make_dashboard.py` — main overview dashboard
+## Deployment
 
-Builds the main dashboard and `output/index.html`. With `--fetch` it also runs `bibliometrics.py` first, making it the single entry point for the full pipeline.
+`deploy.sh` rsyncs the current topic's output to a web server:
 
 ```bash
-python make_dashboard.py                      # rebuild HTML from existing CSVs
-python make_dashboard.py --fetch              # fetch data then build
-python make_dashboard.py --output-dir results # custom output directory
+./deploy.sh
 ```
+
+The prefix is read from `config.json` automatically. It deploys `output/{prefix}/` to
+`~/misc/{prefix}/` on the server, and `server_index.html` to `~/misc/index.html`.
+
+`server_index.html` is a landing page linking to all deployed topics.
 
 ---
 
-### `make_interactive_network.py` — co-authorship network
+## Syncing between machines
 
-Interactive network explorer. Adjust the minimum-papers threshold, step through years, or search for a specific author.
+Since `data/` and `output/` are not in git, use rsync to transfer them:
 
 ```bash
-python make_interactive_network.py
+rsync -avz --exclude='.git/' --exclude='venv/' \
+  ~/Documents/upf_bibliography/ \
+  WorkLinux:~/Projects/upf_bibliography/
 ```
 
----
-
-### `make_world_map.py` — world map
-
-Institution-level bubble map (falls back to country centroids when coordinates are unavailable). Exports both an interactive HTML file and a 1 600 × 900 px PNG.
+On the receiving machine, recreate the venv if needed:
 
 ```bash
-python make_world_map.py
-```
-
----
-
-### `make_study_type_dashboard.py` — study-type dashboard
-
-Standalone page with a donut chart (overall distribution) and a stacked bar chart (2000–2024 trends).
-
-```bash
-python make_study_type_dashboard.py
-```
-
----
-
-### `make_study_type_network.py` — study-type network
-
-Co-authorship network where node colour and shape encode each author's dominant study type.
-
-```bash
-python make_study_type_network.py
-```
-
----
-
-### `make_journal_dashboard.py` — journal analysis
-
-Four charts: top journals by paper count, citations-per-paper vs volume (bubble), study-type mix by journal (100 % stacked bar), and publication trends for the top 10 journals. Pre-print servers and institutional repositories (medRxiv, Figshare, Zenodo, LA Referencia, etc.) are excluded automatically.
-
-```bash
-python make_journal_dashboard.py
-```
-
----
-
-## Project layout
-
-```
-keyword-bibliometrics/
-├── config.json                      # topic title, prefix, search keywords
-├── bibliometrics.py                 # data retrieval from OpenAlex
-├── make_dashboard.py                # main overview + index.html
-├── make_interactive_network.py      # co-authorship network explorer
-├── make_world_map.py                # world map (HTML + PNG)
-├── make_study_type_dashboard.py     # study-type charts
-├── make_study_type_network.py       # study-type co-authorship network
-├── make_journal_dashboard.py        # journal analysis
-├── requirements.txt
-└── output/                          # generated HTML, PNG, CSV (git-tracked)
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 ```
 
 ---
@@ -229,6 +250,8 @@ pandas
 matplotlib
 networkx
 plotly
+kaleido
+scipy
 ```
 
 Python 3.9 or later. No API key is needed for OpenAlex.
