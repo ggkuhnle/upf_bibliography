@@ -1092,11 +1092,7 @@ def main():
     author_df = pd.read_csv(author_path)
 
     has_year_data = os.path.exists(by_year_path)
-    year_df = pd.read_csv(by_year_path) if has_year_data else None
-    if has_year_data:
-        print(f"  Year-annotated edges loaded: {len(year_df):,} rows")
-    else:
-        print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
+    year_df = None  # loaded later, after node_set is known
 
     # Load dominant subclass per author (optional — requires --fetch with subclasses config)
     sc_path = os.path.join(data, _pf("papers_by_author_subclass.csv"))
@@ -1169,6 +1165,14 @@ def main():
 
     print(f"  Plotting graph: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
     node_set = set(G_plot.nodes())
+
+    if has_year_data:
+        print("  Loading year-annotated edges (filtered to plot nodes)…")
+        year_df = pd.read_csv(by_year_path)
+        year_df = year_df[year_df["citing_author_id"].isin(node_set) & year_df["cited_author_id"].isin(node_set)]
+        print(f"  Year-annotated edges after filter: {len(year_df):,} rows")
+    else:
+        print("  No by-year edge file found; year filter disabled (re-run --fetch to generate)")
 
     G_undirected = G_plot.to_undirected()
 
