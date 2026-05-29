@@ -586,7 +586,7 @@ function updateNodeSlider() {
   var lb = document.getElementById('node-limit-label');
   if (sl) sl.value = _displayN;
   if (ni) ni.value = _displayN;
-  if (lb) lb.textContent = 'of ' + TOTAL_NODES + ' authors';
+  if (lb) lb.textContent = 'Showing ' + Math.min(_displayN, TOTAL_NODES) + ' of ' + TOTAL_NODES + ' authors';
 }
 
 function selectNode(node) {
@@ -1211,6 +1211,10 @@ def main():
     keep_mask = (adf["papers"] >= args.min_papers) | (adf["citations"] >= args.min_citations)
     keep_set  = set(adf.loc[keep_mask, "author_id"])
     print(f"  Pre-filter: {len(keep_set):,} authors with ≥{args.min_papers} papers or ≥{args.min_citations} citations")
+    # For small datasets the strict filter can cut too aggressively — fall back to all authors
+    if len(keep_set) < DEFAULT_DISPLAY:
+        keep_set = set(adf["author_id"].dropna())
+        print(f"  Filtered set smaller than DEFAULT_DISPLAY ({DEFAULT_DISPLAY}) — using all {len(keep_set):,} authors")
 
     # ── Build directed graph (vectorised) ────────────────────────────────────
     print("Building directed citation graph…")
@@ -1748,12 +1752,12 @@ a{color:inherit}"""
     print(f"Written: {output_file}  ({os.path.getsize(output_file) // 1024} KB)")
 
     # ── Fullscreen standalone explorer ────────────────────────────────────────
-    # Directed in/out adjacency for the side panel
+    # Directed in/out adjacency for the side panel (only plotly-subset edges)
     in_adj_list  = [[] for _ in node_ids]
     out_adj_list = [[] for _ in node_ids]
-    for u, v in G_plot.edges():
+    for u, v in G_plotly.edges():
         ui = node_id_to_idx[u]; vi = node_id_to_idx[v]
-        w  = G_plot[u][v].get("weight", 1)
+        w  = G_plotly[u][v].get("weight", 1)
         out_adj_list[ui].append([vi, w])
         in_adj_list[vi].append([ui, w])
     for i in range(len(node_ids)):
