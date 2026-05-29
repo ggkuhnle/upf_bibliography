@@ -13,9 +13,9 @@ Writes:
 import argparse
 import json as _json
 import os
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 OUTPUT_DIR = "output"
 
@@ -57,10 +57,6 @@ DISCLAIMER = (
 )
 
 
-def _pf(name):
-    return name
-
-
 def _trunc(s, n=60):
     if not isinstance(s, str):
         return ""
@@ -74,13 +70,10 @@ def fig_top_papers(df, n=50):
     top = df.nlargest(n, "citations").copy()
     top = top.sort_values("citations")
     top["label"] = top["title"].map(lambda t: _trunc(t, 60))
-    top["doi_link"] = top["doi"].map(
-        lambda d: f'<a href="https://doi.org/{d}" target="_blank">{d}</a>' if d else ""
-    )
-    top["hover_title"] = top["title"].fillna("").map(lambda t: _trunc(t, 120))
+    top["hover_title"]   = top["title"].fillna("").map(lambda t: _trunc(t, 120))
     top["hover_journal"] = top["journal"].fillna("")
-    top["hover_year"] = top["year"].fillna("").astype(str)
-    top["hover_doi"] = top["doi"].fillna("")
+    top["hover_year"]    = top["year"].fillna("").astype(str)
+    top["hover_doi"]     = top["doi"].fillna("")
 
     fig = go.Figure(go.Bar(
         x=top["citations"],
@@ -112,14 +105,26 @@ def fig_top_papers(df, n=50):
 
 
 def fig_citation_histogram(df):
-    """Histogram of citations per paper, log x-axis."""
-    cites = df["citations"].dropna().astype(int)
-    cites = cites[cites > 0]
-    fig = go.Figure(go.Histogram(
-        x=cites,
+    """Bar chart of citation distribution with log-spaced bins."""
+    cites = pd.to_numeric(df["citations"], errors="coerce").dropna()
+    cites = cites[cites > 0].values
+
+    if len(cites) == 0:
+        fig = go.Figure()
+        fig.update_layout(title="Citation Distribution (no data)", height=420)
+        return fig
+
+    max_val = float(cites.max())
+    bins = np.logspace(0, np.log10(max_val + 1), 45)
+    counts, edges = np.histogram(cites, bins=bins)
+    mid = np.sqrt(edges[:-1] * edges[1:])  # geometric midpoint of each bin
+
+    fig = go.Figure(go.Bar(
+        x=mid,
+        y=counts,
         marker_color="#2980b9",
         opacity=0.85,
-        hovertemplate="Citations: %{x}<br>Papers: %{y}<extra></extra>",
+        hovertemplate="~%{x:.0f} citations<br>Papers: %{y:,}<extra></extra>",
     ))
     fig.update_layout(
         title="Citation Distribution (papers with ≥1 citation, log x-axis)",
@@ -128,6 +133,7 @@ def fig_citation_histogram(df):
         height=420,
         margin=dict(l=10, r=10, t=60, b=50),
         plot_bgcolor="white", paper_bgcolor="white",
+        bargap=0.05,
     )
     fig.update_xaxes(showgrid=True, gridcolor="#eee")
     fig.update_yaxes(showgrid=True, gridcolor="#eee")
@@ -135,40 +141,27 @@ def fig_citation_histogram(df):
 
 
 def fig_papers_by_year(df):
-    """Stacked bar: papers per year, OA vs non-OA."""
-    if "open_access" not in df.columns:
-        df = df.copy()
-        df["open_access"] = False
-
-    df2 = df.copy()
-    df2["open_access"] = df2["open_access"].astype(bool)
-    df2 = df2[df2["year"].notna()].copy()
+    """Bar chart: total papers per year."""
+    df2 = df[df["year"].notna()].copy()
+    df2["year"] = pd.to_numeric(df2["year"], errors="coerce")
+    df2 = df2[df2["year"].notna() & (df2["year"] >= 2000)].copy()
     df2["year"] = df2["year"].astype(int)
-    df2 = df2[df2["year"] >= 2000]
 
-    oa  = df2[df2["open_access"]].groupby("year").size().reset_index(name="oa_papers")
-    non = df2[~df2["open_access"]].groupby("year").size().reset_index(name="non_oa_papers")
-    years = pd.DataFrame({"year": range(df2["year"].min(), df2["year"].max() + 1)})
-    merged = years.merge(oa, on="year", how="left").merge(non, on="year", how="left").fillna(0)
+    counts = df2.groupby("year").size().reset_index(name="papers")
+    years  = pd.DataFrame({"year": range(int(counts["year"].min()),
+                                         int(counts["year"].max()) + 1)})
+    merged = years.merge(counts, on="year", how="left").fillna(0)
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=merged["year"], y=merged["oa_papers"],
-        name="Open Access", marker_color="#27ae60",
-        hovertemplate="Year: %{x}<br>Open Access papers: %{y:,}<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=merged["year"], y=merged["non_oa_papers"],
-        name="Non-OA", marker_color="#2980b9",
-        hovertemplate="Year: %{x}<br>Non-OA papers: %{y:,}<extra></extra>",
+    fig = go.Figure(go.Bar(
+        x=merged["year"], y=merged["papers"],
+        marker_color="#2980b9",
+        hovertemplate="Year: %{x}<br>Papers: %{y:,}<extra></extra>",
     ))
     fig.update_layout(
-        title="Papers per Year (Open Access vs Non-OA)",
-        barmode="stack",
+        title="Papers per Year",
         xaxis_title="Year", yaxis_title="Papers",
         height=420,
         margin=dict(l=10, r=10, t=60, b=50),
-        legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
         plot_bgcolor="white", paper_bgcolor="white",
     )
     fig.update_xaxes(showgrid=True, gridcolor="#eee", dtick=1)
@@ -201,31 +194,6 @@ def fig_study_type_donut(df):
     return fig
 
 
-def fig_open_access_donut(df):
-    """Donut chart: OA vs non-OA."""
-    if "open_access" not in df.columns:
-        return None
-    df2 = df.copy()
-    df2["open_access"] = df2["open_access"].astype(bool)
-    n_oa  = int(df2["open_access"].sum())
-    n_non = int((~df2["open_access"]).sum())
-
-    fig = go.Figure(go.Pie(
-        labels=["Open Access", "Non-OA"],
-        values=[n_oa, n_non],
-        hole=0.42,
-        marker_colors=["#27ae60", "#2980b9"],
-        textinfo="label+percent",
-        hovertemplate="<b>%{label}</b><br>Papers: %{value:,} (%{percent})<extra></extra>",
-    ))
-    fig.update_layout(
-        title="Open Access Status",
-        height=420,
-        margin=dict(l=10, r=10, t=60, b=10),
-    )
-    return fig
-
-
 # ── HTML assembly ─────────────────────────────────────────────────────────────
 
 def main():
@@ -242,7 +210,7 @@ def main():
     out  = args.output_dir
     data = args.data_dir
 
-    detail_path = os.path.join(data, _pf("papers_detail.csv"))
+    detail_path = os.path.join(data, "papers_detail.csv")
     if not os.path.exists(detail_path):
         print(f"papers_detail.csv not found at {detail_path} — skipping paper dashboard.")
         print("Re-run bibliometrics.py to generate papers_detail.csv first.")
@@ -250,23 +218,20 @@ def main():
 
     print("Loading data…")
     df = pd.read_csv(detail_path)
+    df["citations"] = pd.to_numeric(df["citations"], errors="coerce").fillna(0)
     n_papers = len(df)
-    n_oa = int(df["open_access"].astype(bool).sum()) if "open_access" in df.columns else 0
-    print(f"  {n_papers:,} papers loaded")
+    n_cited  = int((df["citations"] > 0).sum())
+    print(f"  {n_papers:,} papers loaded  ({n_cited:,} with citations)")
 
     print("Building figures…")
     figs = []
-    figs.append(("Top 50 Papers by Citations",     fig_top_papers(df, n=50)))
-    figs.append(("Citation Distribution",          fig_citation_histogram(df)))
-    figs.append(("Papers by Year (OA vs Non-OA)",  fig_papers_by_year(df)))
+    figs.append(("Top 50 Papers by Citations",  fig_top_papers(df, n=50)))
+    figs.append(("Citation Distribution",        fig_citation_histogram(df)))
+    figs.append(("Papers per Year",              fig_papers_by_year(df)))
 
     st_fig = fig_study_type_donut(df)
     if st_fig is not None:
         figs.append(("Study Type Breakdown", st_fig))
-
-    oa_fig = fig_open_access_donut(df)
-    if oa_fig is not None:
-        figs.append(("Open Access Status", oa_fig))
 
     fig_divs = {
         title: fig.to_html(full_html=False, include_plotlyjs=False,
@@ -279,13 +244,13 @@ def main():
     )
 
     # ── Searchable paper table ────────────────────────────────────────────────
-    import json as _json
-    search_cols = ["title", "journal", "year", "citations", "study_type", "open_access", "doi"]
-    _sdf = df[search_cols].fillna("").copy()
+    search_cols = ["title", "journal", "year", "citations", "study_type", "doi"]
+    _sdf = df[[c for c in search_cols if c in df.columns]].fillna("").copy()
     _sdf["citations"] = pd.to_numeric(_sdf["citations"], errors="coerce").fillna(0).astype(int)
     _sdf["year"]      = _sdf["year"].astype(str).str.replace(r"\.0$", "", regex=True)
-    _sdf["open_access"] = _sdf["open_access"].map(lambda v: "OA" if str(v).lower() in ("true","1","yes") else "")
-    papers_json = _json.dumps(_sdf.sort_values("citations", ascending=False).to_dict(orient="records"))
+
+    # Use pandas to_json to avoid numpy int64 serialisation errors
+    papers_json = _sdf.sort_values("citations", ascending=False).to_json(orient="records")
 
     generated = pd.Timestamp.now().strftime("%B %Y")
     html = f"""<!DOCTYPE html>
@@ -330,17 +295,16 @@ a{{color:inherit}}
 #paper-results th:hover{{background:#1a5a8a}}
 #paper-results td{{padding:6px 10px;border-bottom:1px solid #eee;vertical-align:top}}
 #paper-results tr:hover td{{background:#f0f6ff}}
-.oa-badge{{background:#27ae60;color:#fff;font-size:.68rem;padding:1px 5px;border-radius:8px;white-space:nowrap}}
 </style>
 </head>
 <body>
 {DISCLAIMER}
 <div id="hdr">
   <h1>{_TITLE} — Paper Analysis</h1>
-  <p>Individual paper details: citations, open access, study types and year-by-year output.</p>
+  <p>Individual paper details: citations, study types and year-by-year output.</p>
   <div class="stats">
     <div class="stat"><span class="n">{n_papers:,}</span><span class="l">Papers</span></div>
-    <div class="stat"><span class="n">{n_oa:,}</span><span class="l">Open Access</span></div>
+    <div class="stat"><span class="n">{n_cited:,}</span><span class="l">With Citations</span></div>
   </div>
 </div>
 <main>
@@ -351,12 +315,11 @@ a{{color:inherit}}
   <div id="paper-results">
     <table>
       <thead><tr>
-        <th onclick="paperSort('citations')">#&nbsp;Citations &#8597;</th>
+        <th onclick="paperSort('citations')"># Citations &#8597;</th>
         <th onclick="paperSort('title')">Title &#8597;</th>
         <th onclick="paperSort('journal')">Journal &#8597;</th>
         <th onclick="paperSort('year')">Year &#8597;</th>
         <th onclick="paperSort('study_type')">Study type &#8597;</th>
-        <th>OA</th>
       </tr></thead>
       <tbody id="paper-tbody"></tbody>
     </table>
@@ -372,7 +335,7 @@ a{{color:inherit}}
 const PAPERS = {papers_json};
 let _sortKey = 'citations', _sortAsc = false;
 function paperSort(k) {{
-  if (_sortKey === k) _sortAsc = !_sortAsc; else {{ _sortKey = k; _sortAsc = k !== 'citations'; }}
+  if (_sortKey === k) _sortAsc = !_sortAsc; else {{ _sortKey = k; _sortAsc = (k !== 'citations'); }}
   paperSearch();
 }}
 function paperSearch() {{
@@ -384,24 +347,25 @@ function paperSearch() {{
     (p.study_type||'').toLowerCase().includes(q)
   ) : PAPERS.slice();
   rows.sort((a,b) => {{
-    let av = a[_sortKey]||'', bv = b[_sortKey]||'';
-    if (typeof av === 'number') return _sortAsc ? av-bv : bv-av;
+    let av = a[_sortKey], bv = b[_sortKey];
+    if (av === null || av === undefined) av = (_sortKey === 'citations') ? 0 : '';
+    if (bv === null || bv === undefined) bv = (_sortKey === 'citations') ? 0 : '';
+    if (_sortKey === 'citations') return _sortAsc ? av - bv : bv - av;
     return _sortAsc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
   }});
   const cnt = document.getElementById('paper-count');
-  cnt.textContent = q ? rows.length + ' result' + (rows.length!==1?'s':'') + ' for "' + document.getElementById('paper-search').value + '"'
-                      : 'Showing all ' + rows.length.toLocaleString() + ' papers — type to filter';
+  cnt.textContent = q
+    ? rows.length + ' result' + (rows.length!==1?'s':'') + ' for "' + document.getElementById('paper-search').value + '"'
+    : 'Showing top 500 of ' + rows.length.toLocaleString() + ' papers — type to filter';
   const doi_url = d => d ? `<a href="https://doi.org/${{d}}" target="_blank" style="color:#2980b9">${{d}}</a>` : '';
-  const oa_badge = v => v==='OA' ? '<span class="oa-badge">OA</span>' : '';
   document.getElementById('paper-tbody').innerHTML = rows.slice(0,500).map(p =>
     `<tr>
-      <td style="text-align:right;white-space:nowrap">${{(p.citations||0).toLocaleString()}}</td>
+      <td style="text-align:right;white-space:nowrap">${{Number(p.citations||0).toLocaleString()}}</td>
       <td><b>${{(p.title||'').substring(0,120)}}${{(p.title||'').length>120?'…':''}}</b><br>
           <span style="font-size:.75rem;color:#888">${{doi_url(p.doi)}}</span></td>
       <td style="white-space:nowrap;font-size:.8rem">${{p.journal||''}}</td>
       <td style="white-space:nowrap">${{p.year||''}}</td>
       <td style="font-size:.8rem">${{p.study_type||''}}</td>
-      <td>${{oa_badge(p.open_access)}}</td>
     </tr>`
   ).join('');
 }}
@@ -412,12 +376,11 @@ paperSearch();
 """
 
     os.makedirs(out, exist_ok=True)
-    output_file = os.path.join(out, _pf("paper_dashboard.html"))
+    output_file = os.path.join(out, "paper_dashboard.html")
     with open(output_file, "w", encoding="utf-8") as fh:
         fh.write(html)
     print(f"Written: {output_file}  ({os.path.getsize(output_file) // 1024} KB)")
 
-    # Quick summary
     print(f"\nTop 10 papers by citations:")
     for _, r in df.nlargest(10, "citations").iterrows():
         print(f"  {int(r['citations']):>6,}  {_trunc(str(r.get('title', '')), 70)}")

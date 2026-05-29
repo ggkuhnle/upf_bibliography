@@ -1659,7 +1659,7 @@ def main():
     print("Assembling HTML…")
     html = build_html(dashboard_figs, centrality_df, institutions_df, country_df,
                       authors_df, dept_df, funders_df, G_lcc, communities,
-                      citation_cent_df=_cit_cent_df if '_cit_cent_df' in dir() else None)
+                      citation_cent_df=_cit_cent_df if '_cit_cent_df' in locals() else None)
 
     dash_path = os.path.join(out, _pf("dashboard.html"))
     with open(dash_path, "w", encoding="utf-8") as fh:
