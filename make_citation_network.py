@@ -48,7 +48,7 @@ PALETTE = [
     "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF",
 ]
 
-TOP_NODES   = 300
+TOP_NODES   = 2000   # safety cap — normally overridden by min-papers/min-citations filter
 TOP_BAR     = 25
 TOP_LABELS  = 20
 LAYOUT_SEED = 42
@@ -1080,6 +1080,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default=os.path.join(OUTPUT_DIR, _PREFIX) if _PREFIX else OUTPUT_DIR)
     parser.add_argument("--data-dir", default=os.path.join("data", _PREFIX) if _PREFIX else "data")
+    parser.add_argument("--min-papers",    type=int, default=3,  help="Include authors with at least this many papers")
+    parser.add_argument("--min-citations", type=int, default=10, help="Include authors with at least this many citations (catches unicorns)")
     args = parser.parse_args()
     out  = args.output_dir
     data = args.data_dir
@@ -1133,6 +1135,16 @@ def main():
                 "citations":   int(r.get("citations", 0)),
             }
 
+    # ── Pre-filter: keep authors with ≥min_papers OR ≥min_citations ─────────
+    keep_set = set()
+    for _, r in author_df.iterrows():
+        aid = r.get("author_id")
+        if pd.isna(aid) or not aid:
+            continue
+        if int(r.get("papers", 0)) >= args.min_papers or int(r.get("citations", 0)) >= args.min_citations:
+            keep_set.add(aid)
+    print(f"  Pre-filter: {len(keep_set):,} authors with ≥{args.min_papers} papers or ≥{args.min_citations} citations")
+
     # ── Build directed graph ──────────────────────────────────────────────────
     print("Building directed citation graph…")
     G = nx.DiGraph()
@@ -1141,6 +1153,8 @@ def main():
         cd  = row.get("cited_author_id")
         cnt = int(row.get("citations", 1))
         if pd.isna(ca) or pd.isna(cd) or not ca or not cd:
+            continue
+        if ca not in keep_set or cd not in keep_set:
             continue
         if G.has_edge(ca, cd):
             G[ca][cd]["weight"] += cnt
@@ -1151,6 +1165,7 @@ def main():
 
     indegree_all = dict(G.in_degree())
     if G.number_of_nodes() > TOP_NODES:
+        print(f"  Applying safety cap at {TOP_NODES} nodes…")
         top_nodes = sorted(indegree_all, key=lambda n: indegree_all[n], reverse=True)[:TOP_NODES]
         G_plot = G.subgraph(top_nodes).copy()
     else:
