@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Build all topics and deploy. Flavonoids run last (largest dataset).
+# Usage: ./build_all.sh [--fetch]
 set -euo pipefail
+
+FETCH=""
+for arg in "$@"; do
+    case "$arg" in
+        --fetch) FETCH="--fetch" ;;
+        *) echo "Unknown argument: $arg"; exit 1 ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -42,8 +51,8 @@ for cfg in "${configs[@]}"; do
 
     cp "$cfg" config.json
 
-    echo "→ Building dashboards…"
-    python make_dashboard.py
+    echo "→ Building dashboards${FETCH:+ (with fetch)}…"
+    python make_dashboard.py $FETCH
 
     echo "→ Deploying…"
     ./deploy.sh

@@ -48,7 +48,9 @@ PALETTE = [
     "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF",
 ]
 
-TOP_NODES   = 2000   # safety cap — normally overridden by min-papers/min-citations filter
+TOP_NODES       = 2000   # safety cap — normally overridden by min-papers/min-citations filter
+PLOTLY_NODES    = 300    # cap for Plotly overview (static scatter)
+DEFAULT_DISPLAY = 500    # initial nodes shown in Cytoscape
 TOP_BAR     = 25
 TOP_LABELS  = 20
 LAYOUT_SEED = 42
@@ -272,14 +274,16 @@ def fig_betweenness(author_lookup, betweenness_map):
     return fig
 
 
-def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
-                          pagerank, in_adj_list, out_adj_list, edge_papers_map,
+def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
+                          pagerank, edge_papers_map,
                           n_communities, generated_date, author_subclass=None,
                           author_funders=None):
     """Write a fullscreen Cytoscape.js citation-network explorer."""
+    indegree_map = dict(G_plot.in_degree())
+    # Sort all nodes by in-degree so rank 1 = most cited
+    node_ids = sorted(G_plot.nodes(), key=lambda n: indegree_map.get(n, 0), reverse=True)
     n_nodes = len(node_ids)
     n_edges = G_plot.number_of_edges()
-    indegree_map = dict(G_plot.in_degree())
 
     pr_vals = list(pagerank.values())
     pr_min, pr_max = (min(pr_vals), max(pr_vals)) if pr_vals else (0, 1)
@@ -321,6 +325,18 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
     _asc = author_subclass or {}
     _afu = author_funders or {}
 
+    # Rebuild in/out adjacency lists using this function's node ordering
+    in_adj_list  = [[] for _ in node_ids]
+    out_adj_list = [[] for _ in node_ids]
+    for u, v in G_plot.edges():
+        ui = node_id_to_idx[u]; vi = node_id_to_idx[v]
+        w  = G_plot[u][v].get("weight", 1)
+        out_adj_list[ui].append([vi, w])
+        in_adj_list[vi].append([ui, w])
+    for i in range(len(node_ids)):
+        in_adj_list[i].sort(key=lambda x: -x[1])
+        out_adj_list[i].sort(key=lambda x: -x[1])
+
     # ── Nodes ─────────────────────────────────────────────────────────────────
     cy_nodes = []
     for i, nid in enumerate(node_ids):
@@ -349,6 +365,7 @@ def write_cytoscape_html(out, G_plot, node_ids, author_lookup, partition, pos,
                 "sizeIndeg": _indeg_sz(indegree_map.get(nid, 0)),
                 "sizePR":    _pr_sz(pagerank.get(nid, pr_min)),
                 "shape":     SUBCLASS_SHAPES.get(sc, "ellipse"),
+                "rank":      i + 1,
             },
             "position": {
                 "x": round(float(x) * cy_scale, 2),
@@ -463,11 +480,14 @@ var NODE_NAMES = {node_names_js};
 var NODE_INST  = {node_inst_js};
 var IN_ADJ     = {in_adj_js};
 var OUT_ADJ    = {out_adj_js};
+var DEFAULT_DISPLAY = {min(DEFAULT_DISPLAY, n_nodes)};
+var TOTAL_NODES = {n_nodes};
 """
 
     js_code = r"""
 var state = {egoIdx:-1, pathFrom:-1, pathTo:-1, sizeMode:'indeg', nbOnly:false};
 var cy;
+var _displayN = DEFAULT_DISPLAY;
 
 var CY_STYLE = [
   {selector:'node', style:{
@@ -532,6 +552,31 @@ function initCy() {
   cy.on('tap',         function(e){ if(e.target===cy) resetAll(); });
   cy.on('mouseover','node', function(e){ e.target.addClass('hovered'); });
   cy.on('mouseout', 'node', function(e){ e.target.removeClass('hovered'); });
+  // Hide nodes beyond DEFAULT_DISPLAY initially
+  cy.batch(function() {
+    cy.nodes().forEach(function(n) {
+      if (n.data('rank') > DEFAULT_DISPLAY) n.hide();
+    });
+  });
+  _displayN = DEFAULT_DISPLAY;
+  updateNodeSlider();
+}
+
+function applyNodeLimit(n) {
+  _displayN = n;
+  cy.batch(function() {
+    cy.nodes().forEach(function(nd) {
+      if (nd.data('rank') <= n) nd.show(); else nd.hide();
+    });
+  });
+  updateNodeSlider();
+}
+
+function updateNodeSlider() {
+  var sl = document.getElementById('node-limit-slider');
+  var lb = document.getElementById('node-limit-label');
+  if (sl) sl.value = _displayN;
+  if (lb) lb.textContent = 'Showing ' + Math.min(_displayN, TOTAL_NODES) + ' of ' + TOTAL_NODES + ' authors';
 }
 
 function selectNode(node) {
@@ -900,6 +945,17 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 """
 
+    node_slider_html = f"""
+  <div class="cg">
+    <label>Max nodes</label>
+    <div class="yr-wrap">
+      <input id="node-limit-slider" type="range"
+             min="50" max="{n_nodes}" step="50" value="{min(DEFAULT_DISPLAY, n_nodes)}"
+             oninput="applyNodeLimit(+this.value)" style="width:120px"/>
+      <span id="node-limit-label" style="font-size:.72rem;color:#555">Showing {min(DEFAULT_DISPLAY, n_nodes)} of {n_nodes} authors</span>
+    </div>
+  </div>"""
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1030,6 +1086,8 @@ document.addEventListener('DOMContentLoaded', function() {
     </select>
   </div>
   <div class="sep"></div>
+  {node_slider_html}
+  <div class="sep"></div>
   <label class="nb-lbl"><input type="checkbox" id="nb-only" onchange="toggleNeighborsOnly()" />&nbsp;Neighbours only</label>
   <button class="reset-btn" id="reset-btn" onclick="resetAll()">&#8857; Reset</button>
   <button class="dl-btn" onclick="downloadCSV()">&#8595; CSV</button>
@@ -1122,56 +1180,46 @@ def main():
     papers_path = os.path.join(data, _pf("citation_edges_author_papers.csv"))
     edge_papers_map: dict = {}  # populated later, after node_set is known
 
-    # ── Author lookup ─────────────────────────────────────────────────────────
-    author_lookup = {}
-    for _, r in author_df.iterrows():
-        aid = r.get("author_id")
-        if pd.notna(aid) and aid:
-            author_lookup[aid] = {
-                "author_name": str(r.get("author_name") or ""),
-                "institution": str(r.get("institution") or ""),
-                "country":     str(r.get("country") or ""),
-                "papers":      int(r.get("papers", 0)),
-                "citations":   int(r.get("citations", 0)),
-            }
-
-    # ── Pre-filter: keep authors with ≥min_papers OR ≥min_citations ─────────
-    keep_set = set()
-    for _, r in author_df.iterrows():
-        aid = r.get("author_id")
-        if pd.isna(aid) or not aid:
-            continue
-        if int(r.get("papers", 0)) >= args.min_papers or int(r.get("citations", 0)) >= args.min_citations:
-            keep_set.add(aid)
+    # ── Author lookup + pre-filter (vectorised) ───────────────────────────────
+    adf = author_df.dropna(subset=["author_id"]).copy()
+    adf["papers"]    = pd.to_numeric(adf.get("papers",    0), errors="coerce").fillna(0).astype(int)
+    adf["citations"] = pd.to_numeric(adf.get("citations", 0), errors="coerce").fillna(0).astype(int)
+    author_lookup = {
+        row["author_id"]: {
+            "author_name": str(row.get("author_name") or ""),
+            "institution": str(row.get("institution") or ""),
+            "country":     str(row.get("country") or ""),
+            "papers":      row["papers"],
+            "citations":   row["citations"],
+        }
+        for _, row in adf.iterrows()
+    }
+    keep_mask = (adf["papers"] >= args.min_papers) | (adf["citations"] >= args.min_citations)
+    keep_set  = set(adf.loc[keep_mask, "author_id"])
     print(f"  Pre-filter: {len(keep_set):,} authors with ≥{args.min_papers} papers or ≥{args.min_citations} citations")
 
-    # ── Build directed graph ──────────────────────────────────────────────────
+    # ── Build directed graph (vectorised) ────────────────────────────────────
     print("Building directed citation graph…")
+    cdf = cite_df.dropna(subset=["citing_author_id", "cited_author_id"]).copy()
+    cdf = cdf[cdf["citing_author_id"].isin(keep_set) & cdf["cited_author_id"].isin(keep_set)]
+    cdf["citations"] = pd.to_numeric(cdf.get("citations", 1), errors="coerce").fillna(1).astype(int)
+    edge_weights = cdf.groupby(["citing_author_id", "cited_author_id"])["citations"].sum()
     G = nx.DiGraph()
-    for _, row in cite_df.iterrows():
-        ca  = row.get("citing_author_id")
-        cd  = row.get("cited_author_id")
-        cnt = int(row.get("citations", 1))
-        if pd.isna(ca) or pd.isna(cd) or not ca or not cd:
-            continue
-        if ca not in keep_set or cd not in keep_set:
-            continue
-        if G.has_edge(ca, cd):
-            G[ca][cd]["weight"] += cnt
-        else:
-            G.add_edge(ca, cd, weight=cnt)
+    for (ca, cd), w in edge_weights.items():
+        G.add_edge(ca, cd, weight=int(w))
 
     print(f"  Full graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
-    indegree_all = dict(G.in_degree())
-    if G.number_of_nodes() > TOP_NODES:
+    G_plot = G.copy()
+    indegree_all = dict(G_plot.in_degree())
+    print(f"  Full graph: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
+
+    # Safety cap
+    if G_plot.number_of_nodes() > TOP_NODES:
         print(f"  Applying safety cap at {TOP_NODES} nodes…")
         top_nodes = sorted(indegree_all, key=lambda n: indegree_all[n], reverse=True)[:TOP_NODES]
-        G_plot = G.subgraph(top_nodes).copy()
-    else:
-        G_plot = G.copy()
-
-    print(f"  Plotting graph: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
+        G_plot = G_plot.subgraph(top_nodes).copy()
+        indegree_all = dict(G_plot.in_degree())
     node_set = set(G_plot.nodes())
 
     if has_year_data:
@@ -1188,10 +1236,9 @@ def main():
         print("  Loading edge-papers data (chunked, filtered to plot nodes)…")
         for chunk in pd.read_csv(papers_path, chunksize=500_000):
             chunk = chunk[chunk["citing_author_id"].isin(node_set) & chunk["cited_author_id"].isin(node_set)]
-            for _, row in chunk.iterrows():
-                ca = row.get("citing_author_id"); cd = row.get("cited_author_id")
-                ts = str(row.get("citing_titles") or "")
-                if ca and cd and ts and ts != "nan":
+            chunk = chunk.dropna(subset=["citing_author_id", "cited_author_id", "citing_titles"])
+            for ca, cd, ts in zip(chunk["citing_author_id"], chunk["cited_author_id"], chunk["citing_titles"].astype(str)):
+                if ts and ts != "nan":
                     edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
         print(f"  Edge-papers after filter: {len(edge_papers_map):,} edges with title data")
 
@@ -1220,11 +1267,33 @@ def main():
     print("Computing betweenness centrality…")
     betweenness = nx.betweenness_centrality(G_plot, normalized=True, weight="weight")
 
+    # ── Export author centrality CSV ──────────────────────────────────────────
+    print("Exporting author centrality CSV…")
+    indegree_dict  = dict(G_plot.in_degree())
+    outdegree_dict = dict(G_plot.out_degree())
+    centrality_rows = []
+    for nid in G_plot.nodes():
+        meta = author_lookup.get(nid, {})
+        centrality_rows.append({
+            "author_id":   nid,
+            "author_name": meta.get("author_name", ""),
+            "pagerank":    pagerank.get(nid, 0.0),
+            "betweenness": betweenness.get(nid, 0.0),
+            "indegree":    indegree_dict.get(nid, 0),
+            "outdegree":   outdegree_dict.get(nid, 0),
+        })
+    cent_df = pd.DataFrame(centrality_rows).sort_values("pagerank", ascending=False)
+    cent_path = os.path.join(data, _pf("author_centrality.csv"))
+    cent_df.to_csv(cent_path, index=False)
+    print(f"Saved → {cent_path}  ({len(cent_df):,} authors)")
+
     # ── Node-level data for JS ────────────────────────────────────────────────
     # node_ids order comes from fig_citation_network; we compute it here first
     # to keep all JS arrays in sync.
+    plotly_top = sorted(indegree_all, key=lambda n: indegree_all[n], reverse=True)[:PLOTLY_NODES]
+    G_plotly = G_plot.subgraph(plotly_top) if len(plotly_top) < G_plot.number_of_nodes() else G_plot
     f_net, node_ids, node_names_list = fig_citation_network(
-        G_plot, author_lookup, partition, pos
+        G_plotly, author_lookup, partition, pos
     )
 
     sizes_indeg = [max(5, min(22, 5 + indegree_map.get(nid, 0) * 0.6)) for nid in node_ids]
@@ -2005,8 +2074,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgrou
 
     # ── Cytoscape.js standalone explorer ─────────────────────────────────────
     write_cytoscape_html(
-        out, G_plot, node_ids, author_lookup, partition, pos,
-        pagerank, in_adj_list, out_adj_list, edge_papers_map,
+        out, G_plot, author_lookup, partition, pos,
+        pagerank, edge_papers_map,
         n_communities, generated_date,
         author_subclass=author_subclass or None,
         author_funders=author_funders or None,

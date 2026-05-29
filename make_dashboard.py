@@ -333,6 +333,49 @@ def fig_institutions(institutions_df):
     return fig
 
 
+def fig_author_pagerank(authors_df, citation_cent_df, n=25):
+    """Top N authors by PageRank from citation-network author_centrality.csv.
+
+    citation_cent_df: DataFrame loaded from data/<prefix>/author_centrality.csv
+    produced by make_citation_network.py — columns: author_id, author_name,
+    pagerank, betweenness, indegree, outdegree.
+    """
+    if citation_cent_df is None or citation_cent_df.empty:
+        return None
+    pr_df = citation_cent_df[
+        citation_cent_df["author_name"].notna() & (citation_cent_df["author_name"] != "")
+    ].copy()
+    if pr_df.empty:
+        return None
+    top = pr_df.nlargest(n, "pagerank").sort_values("pagerank")
+    has_extra = "indegree" in top.columns and "betweenness" in top.columns
+    fig = go.Figure(go.Bar(
+        x=top["pagerank"], y=top["author_name"],
+        orientation="h",
+        marker_color="#8e44ad",
+        text=top["pagerank"].map(lambda v: f"{v:.4f}"),
+        textposition="outside",
+        customdata=top[["indegree", "betweenness"]].values if has_extra else None,
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "PageRank: %{x:.5f}<br>"
+            "In-degree: %{customdata[0]}<br>"
+            "Betweenness: %{customdata[1]:.4f}"
+            "<extra></extra>"
+        ) if has_extra else "<b>%{y}</b><br>PageRank: %{x:.5f}<extra></extra>",
+    ))
+    fig.update_layout(
+        title=f"Top {n} Authors by Citation-Network PageRank",
+        xaxis_title="PageRank", yaxis_title="",
+        height=max(500, n * 22),
+        margin=dict(l=10, r=100, t=60, b=40),
+        plot_bgcolor="white", paper_bgcolor="white",
+        yaxis=dict(tickfont=dict(size=11)),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
+    return fig
+
+
 def fig_authors(authors_df):
     clean = authors_df[authors_df["author_name"].notna() & (authors_df["author_name"] != "")].copy()
     auth_p = clean.nlargest(TOP_N_RANKING, "papers").sort_values("papers")
@@ -1076,7 +1119,8 @@ EXPLANATIONS = {
 
 
 def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
-               authors_df, dept_df, funders_df, G_lcc, communities):
+               authors_df, dept_df, funders_df, G_lcc, communities,
+               citation_cent_df=None):
     # Narrative stats
     _auth  = authors_df[authors_df["author_name"].notna() & (authors_df["author_name"] != "")]
     _inst  = institutions_df
@@ -1115,6 +1159,12 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
 </div>"""
 
     # Search data
+    # Build PageRank lookup from citation-network centrality if available
+    _pr_lookup = {}
+    if citation_cent_df is not None and "pagerank" in citation_cent_df.columns:
+        for _, _r in citation_cent_df.iterrows():
+            _pr_lookup[str(_r.get("author_name", ""))] = float(_r.get("pagerank", 0))
+
     search_authors = (
         centrality_df[["name","institution","country","papers","citations",
                         "degree","betweenness","community_label"]]
@@ -1127,6 +1177,7 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
     )
     for r in search_authors:
         r["Betweenness"] = round(float(r["Betweenness"]), 4)
+        r["PageRank"] = round(_pr_lookup.get(r["Author"], 0), 6)
     search_inst = (
         institutions_df[["institution","country","papers","citations"]].fillna("")
         .rename(columns={"institution":"Institution","country":"Country",
@@ -1204,8 +1255,8 @@ function render(){{
     'Showing top 50 of '+src.length.toLocaleString()+' — type to filter';
   thead.className=mode==='dept'?'dept-header':'';
   if(mode==='authors'){{
-    thead.innerHTML='<tr><th>#</th><th>Author</th><th>Institution</th><th>Country</th><th>Papers</th><th>Citations</th><th>Degree</th><th>Betweenness</th><th>Community</th></tr>';
-    tbody.innerHTML=rows.slice(0,200).map((r,i)=>`<tr><td>${{i+1}}</td><td><b>${{r.Author}}</b></td><td>${{r.Institution}}</td><td>${{r.Country}}</td><td>${{r.Papers}}</td><td>${{r.Citations.toLocaleString()}}</td><td>${{r.Degree}}</td><td>${{r.Betweenness}}</td><td>${{r.Community}}</td></tr>`).join('');
+    thead.innerHTML='<tr><th>#</th><th>Author</th><th>Institution</th><th>Country</th><th>Papers</th><th>Citations</th><th>PageRank</th><th>Degree</th><th>Betweenness</th><th>Community</th></tr>';
+    tbody.innerHTML=rows.slice(0,200).map((r,i)=>`<tr><td>${{i+1}}</td><td><b>${{r.Author}}</b></td><td>${{r.Institution}}</td><td>${{r.Country}}</td><td>${{r.Papers}}</td><td>${{r.Citations.toLocaleString()}}</td><td>${{r.PageRank?r.PageRank.toExponential(2):'—'}}</td><td>${{r.Degree}}</td><td>${{r.Betweenness}}</td><td>${{r.Community}}</td></tr>`).join('');
   }}else if(mode==='inst'){{
     thead.innerHTML='<tr><th>#</th><th>Institution</th><th>Country</th><th>Papers</th><th>Citations</th></tr>';
     tbody.innerHTML=rows.slice(0,200).map((r,i)=>`<tr><td>${{i+1}}</td><td><b>${{r.Institution}}</b></td><td>${{r.Country}}</td><td>${{r.Papers}}</td><td>${{r.Citations.toLocaleString()}}</td></tr>`).join('');
@@ -1314,6 +1365,13 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
           ("Study-type mix by journal (100% stacked bar)", ""),
           ("Publication trends", "")],
          p("journal_dashboard.html")),
+        ("c-blue",   "btn-blue",   "Paper Analysis",
+         "Individual paper details: top papers by citations, open access status, study type breakdown and year-by-year output.",
+         [("Top 50 papers by citations (hover for full title + DOI)", ""),
+          ("Citation distribution histogram", ""),
+          ("Papers per year: open access vs non-OA stacked bar", ""),
+          ("Study type &amp; open access donut charts", "")],
+         p("paper_dashboard.html")),
         ("c-teal",   "btn-teal",   "Citation Network",
          "Who cites whom within this literature — internal citation graph and most-cited authors.",
          [("Directed citation graph (top 300 nodes)", ""),
@@ -1487,7 +1545,8 @@ def main():
         ("make_study_type_dashboard.py", "Building study-type dashboard"),
         ("make_study_type_network.py",   "Building study-type network"),
         ("make_journal_dashboard.py",    "Building journal dashboard"),
-        ("make_citation_network.py",    "Building citation network"),
+        ("make_paper_dashboard.py",      "Building paper dashboard"),
+        ("make_citation_network.py",     "Building citation network"),
     ]:
         print(f"{label} ({script_name}) …")
         result = subprocess.run(
@@ -1563,6 +1622,20 @@ def main():
     else:
         print("  ⚠  Author position columns not found — re-run bibliometrics.py")
 
+    # Citation-network PageRank (optional — produced by make_citation_network.py)
+    _cit_cent_path = os.path.join(data, _pf("author_centrality.csv"))
+    if os.path.exists(_cit_cent_path):
+        try:
+            _cit_cent_df = pd.read_csv(_cit_cent_path)
+            # Only use the file if it has the citation-network columns (author_name, pagerank)
+            if "author_name" in _cit_cent_df.columns and "pagerank" in _cit_cent_df.columns:
+                print("  Building citation-network PageRank figure…")
+                _fig_pr = fig_author_pagerank(authors_df, _cit_cent_df)
+                if _fig_pr is not None:
+                    dashboard_figs.append(("Top Authors by Citation PageRank", _fig_pr))
+        except Exception as _e:
+            print(f"  ⚠  Could not load author_centrality.csv: {_e}")
+
     # Subclass figures
     if subclass_df is not None:
         print("  Building subclass figures…")
@@ -1585,7 +1658,8 @@ def main():
 
     print("Assembling HTML…")
     html = build_html(dashboard_figs, centrality_df, institutions_df, country_df,
-                      authors_df, dept_df, funders_df, G_lcc, communities)
+                      authors_df, dept_df, funders_df, G_lcc, communities,
+                      citation_cent_df=_cit_cent_df if '_cit_cent_df' in dir() else None)
 
     dash_path = os.path.join(out, _pf("dashboard.html"))
     with open(dash_path, "w", encoding="utf-8") as fh:

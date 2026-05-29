@@ -941,6 +941,62 @@ def funders_by_author(works: list[dict], rows: list[dict]) -> list[dict]:
     )
 
 
+def papers_detail(works: list[dict], rows: list[dict]) -> list[dict]:
+    """One row per paper with key metadata.
+
+    Columns: work_id, title, doi, year, journal, citations, study_type,
+             country, author_count, open_access.
+    country = first author's country (from rows); author_count = distinct authors on paper.
+    """
+    # Build per-work first-author country and author count from rows
+    work_first_country: dict[str, str] = {}
+    work_author_ids: dict[str, set] = collections.defaultdict(set)
+    seen_first: set[str] = set()
+    for r in rows:
+        wid = r["work_id"]
+        aid = r.get("author_id") or r.get("author_name")
+        if aid:
+            work_author_ids[wid].add(aid)
+        pos = r.get("author_position", "") or ""
+        if pos == "first" and wid not in seen_first:
+            seen_first.add(wid)
+            work_first_country[wid] = r.get("country", "")
+
+    result = []
+    for work in works:
+        wid   = work.get("id", "")
+        title = (work.get("title") or "").strip()
+        doi   = work.get("doi") or ""
+        year  = work.get("publication_year")
+        citations = work.get("cited_by_count", 0)
+        study_type = classify_study_type(work)
+
+        loc = work.get("primary_location") or {}
+        src = loc.get("source") or {}
+        journal = (src.get("display_name") or "").strip()
+
+        oa_field = work.get("open_access") or {}
+        open_access = bool(oa_field.get("is_oa", False))
+
+        country = work_first_country.get(wid, "")
+        author_count = len(work_author_ids.get(wid, set()))
+
+        result.append({
+            "work_id":      wid,
+            "title":        title,
+            "doi":          doi,
+            "year":         year,
+            "journal":      journal,
+            "citations":    citations,
+            "study_type":   study_type,
+            "country":      country,
+            "author_count": author_count,
+            "open_access":  open_access,
+        })
+
+    return sorted(result, key=lambda x: x.get("citations", 0), reverse=True)
+
+
 def papers_by_journal(works: list[dict]) -> list[dict]:
     counter: dict[str, dict] = collections.defaultdict(
         lambda: {"journal_id": "", "papers": 0, "citations": 0}
@@ -1559,6 +1615,13 @@ def main() -> None:
     write_csv(_out("papers_by_author_study_type.csv"),
               ["author_id", "author_name", "institution", "study_type", "papers", "citations"],
               author_st_tbl)
+
+    log.info("Building papers detail table…")
+    detail_tbl = papers_detail(works, rows)
+    write_csv(_out("papers_detail.csv"),
+              ["work_id", "title", "doi", "year", "journal", "citations",
+               "study_type", "country", "author_count", "open_access"],
+              detail_tbl)
 
     if SUBCLASS_KWS:
         subclass_tbl = papers_by_subclass(works)
