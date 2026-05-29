@@ -563,20 +563,30 @@ function initCy() {
 }
 
 function applyNodeLimit(n) {
+  n = Math.max(10, Math.min(n, TOTAL_NODES));
   _displayN = n;
   cy.batch(function() {
     cy.nodes().forEach(function(nd) {
       if (nd.data('rank') <= n) nd.show(); else nd.hide();
     });
+    // Explicitly sync edge visibility: hide edges where either endpoint is hidden
+    cy.edges().forEach(function(e) {
+      var srcHidden = e.source().style('display') === 'none';
+      var tgtHidden = e.target().style('display') === 'none';
+      if (srcHidden || tgtHidden) e.hide(); else e.show();
+    });
   });
+  cy.fit(cy.nodes(':visible'), 40);
   updateNodeSlider();
 }
 
 function updateNodeSlider() {
   var sl = document.getElementById('node-limit-slider');
+  var ni = document.getElementById('node-limit-num');
   var lb = document.getElementById('node-limit-label');
   if (sl) sl.value = _displayN;
-  if (lb) lb.textContent = 'Showing ' + Math.min(_displayN, TOTAL_NODES) + ' of ' + TOTAL_NODES + ' authors';
+  if (ni) ni.value = _displayN;
+  if (lb) lb.textContent = 'of ' + TOTAL_NODES + ' authors';
 }
 
 function selectNode(node) {
@@ -950,9 +960,13 @@ document.addEventListener('DOMContentLoaded', function() {
     <label>Max nodes</label>
     <div class="yr-wrap">
       <input id="node-limit-slider" type="range"
-             min="50" max="{n_nodes}" step="50" value="{min(DEFAULT_DISPLAY, n_nodes)}"
-             oninput="applyNodeLimit(+this.value)" style="width:120px"/>
-      <span id="node-limit-label" style="font-size:.72rem;color:#555">Showing {min(DEFAULT_DISPLAY, n_nodes)} of {n_nodes} authors</span>
+             min="10" max="{n_nodes}" step="50" value="{min(DEFAULT_DISPLAY, n_nodes)}"
+             oninput="applyNodeLimit(+this.value)" style="width:100px"/>
+      <input id="node-limit-num" type="number"
+             min="10" max="{n_nodes}" step="50" value="{min(DEFAULT_DISPLAY, n_nodes)}"
+             onchange="applyNodeLimit(+this.value)"
+             style="width:58px;font-size:.78rem;padding:3px 5px;border:1px solid #c8ced5;border-radius:4px"/>
+      <span id="node-limit-label" style="font-size:.72rem;color:#555">of {n_nodes} authors</span>
     </div>
   </div>"""
 

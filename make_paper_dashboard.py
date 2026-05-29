@@ -110,9 +110,9 @@ def fig_citation_histogram(df):
     cites = cites[cites > 0].values
 
     if len(cites) == 0:
-        fig = go.Figure()
-        fig.update_layout(title="Citation Distribution (no data)", height=420)
-        return fig
+        print("  WARNING: no papers with citations > 0 — citation histogram skipped.")
+        print("  If this is unexpected, re-run bibliometrics.py --fetch to refresh data.")
+        return None
 
     max_val = float(cites.max())
     bins = np.logspace(0, np.log10(max_val + 1), 45)
