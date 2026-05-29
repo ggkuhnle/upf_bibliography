@@ -288,13 +288,19 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
     pr_vals = list(pagerank.values())
     pr_min, pr_max = (min(pr_vals), max(pr_vals)) if pr_vals else (0, 1)
 
+    # Node sizes: small enough that 500 visible nodes don't overlap.
+    # Use sqrt scaling so a few high-degree hubs stand out without dominating.
+    indeg_vals = [indegree_map.get(nid, 0) for nid in node_ids]
+    indeg_p95  = sorted(indeg_vals)[int(len(indeg_vals) * 0.95)] if indeg_vals else 1
+
     def _indeg_sz(indeg):
-        return round(max(8, min(44, 8 + indeg * 1.4)), 2)
+        t = min(1.0, (indeg ** 0.5) / max(1, indeg_p95 ** 0.5))
+        return round(4 + 12 * t, 2)   # 4 px baseline, 16 px max
 
     def _pr_sz(pr):
         if pr_max == pr_min:
-            return 18
-        return round(8 + 36 * (pr - pr_min) / (pr_max - pr_min), 2)
+            return 8
+        return round(4 + 12 * (pr - pr_min) / (pr_max - pr_min), 2)
 
     # Country colours
     ctrs_all = [(author_lookup.get(nid, {}).get("country") or "—") for nid in node_ids]
@@ -1163,8 +1169,8 @@ def main():
     by_year_path = os.path.join(data, _pf("citation_edges_author_by_year.csv"))
 
     print("Loading data…")
-    cite_df   = pd.read_csv(cite_path)
     author_df = pd.read_csv(author_path)
+    # cite_df is loaded later in chunks after keep_set is known (can be 49M+ rows for large topics)
 
     has_year_data = os.path.exists(by_year_path)
     year_df = None  # loaded later, after node_set is known
@@ -1216,21 +1222,34 @@ def main():
         keep_set = set(adf["author_id"].dropna())
         print(f"  Filtered set smaller than DEFAULT_DISPLAY ({DEFAULT_DISPLAY}) — using all {len(keep_set):,} authors")
 
-    # ── Build directed graph (vectorised) ────────────────────────────────────
-    print("Building directed citation graph…")
-    cdf = cite_df.dropna(subset=["citing_author_id", "cited_author_id"]).copy()
-    cdf = cdf[cdf["citing_author_id"].isin(keep_set) & cdf["cited_author_id"].isin(keep_set)]
-    cdf["citations"] = pd.to_numeric(cdf.get("citations", 1), errors="coerce").fillna(1).astype(int)
-    edge_weights = cdf.groupby(["citing_author_id", "cited_author_id"])["citations"].sum()
+    # ── Build directed graph — chunked to avoid OOM on large files ───────────
+    print("Building directed citation graph (chunked)…")
+    chunk_aggs = []
+    for chunk in pd.read_csv(cite_path, chunksize=500_000):
+        chunk = chunk.dropna(subset=["citing_author_id", "cited_author_id"])
+        chunk = chunk[chunk["citing_author_id"].isin(keep_set) & chunk["cited_author_id"].isin(keep_set)]
+        if len(chunk) == 0:
+            continue
+        chunk["citations"] = pd.to_numeric(chunk.get("citations", 1), errors="coerce").fillna(1)
+        agg = chunk.groupby(["citing_author_id", "cited_author_id"])["citations"].sum()
+        chunk_aggs.append(agg)
+    if chunk_aggs:
+        edge_weights = pd.concat(chunk_aggs).groupby(level=[0, 1]).sum()
+    else:
+        edge_weights = pd.Series(dtype=float)
+    del chunk_aggs
+
     G = nx.DiGraph()
     for (ca, cd), w in edge_weights.items():
         G.add_edge(ca, cd, weight=int(w))
+    del edge_weights
 
     print(f"  Full graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
 
-    G_plot = G.copy()
+    G_plot = G
+    del G
     indegree_all = dict(G_plot.in_degree())
-    print(f"  Full graph: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
+    print(f"  Graph after load: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
 
     # Safety cap
     if G_plot.number_of_nodes() > TOP_NODES:
@@ -1281,9 +1300,14 @@ def main():
             return 10
         return round(5 + 17 * (pr - pr_min) / (pr_max - pr_min), 3)
 
-    # ── Betweenness centrality ────────────────────────────────────────────────
-    print("Computing betweenness centrality…")
-    betweenness = nx.betweenness_centrality(G_plot, normalized=True, weight="weight")
+    # ── Betweenness centrality (approximated for large graphs) ───────────────
+    n_nodes_bet = G_plot.number_of_nodes()
+    k_sample = min(n_nodes_bet, 500)  # sample at most 500 pivots
+    if k_sample < n_nodes_bet:
+        print(f"Computing betweenness centrality (approx, k={k_sample})…")
+    else:
+        print("Computing betweenness centrality (exact)…")
+    betweenness = nx.betweenness_centrality(G_plot, k=k_sample, normalized=True, weight="weight")
 
     # ── Export author centrality CSV ──────────────────────────────────────────
     print("Exporting author centrality CSV…")
