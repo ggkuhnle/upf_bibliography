@@ -1133,6 +1133,7 @@ def primary_coauthorship_edges_by_year(rows: list[dict]) -> list[dict]:
 def citation_edges(works: list[dict], rows: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     """
     Build citation edges restricted to works within this corpus.
+    Uses pandas merges instead of Python nested loops for performance.
 
     Returns
     -------
@@ -1141,109 +1142,114 @@ def citation_edges(works: list[dict], rows: list[dict]) -> tuple[list[dict], lis
                                     cited_author_id,  cited_author_name, citations}
     author_edges_by_year : list of {citing_author_id, citing_author_name,
                                     cited_author_id,  cited_author_name, year, citations}
+    author_edges_papers  : list of {citing_author_id, cited_author_id, citing_titles}
     """
-    corpus_ids: set[str] = {w.get("id", "") for w in works if w.get("id")}
-    work_year: dict[str, int] = {
-        w["id"]: w["publication_year"]
-        for w in works
-        if w.get("id") and w.get("publication_year") is not None
-    }
-    work_title: dict[str, str] = {
-        w["id"]: (w.get("title") or "").strip()[:150]
-        for w in works
-        if w.get("id") and w.get("title")
-    }
+    import pandas as _pd
 
-    work_authors: dict[str, list[tuple[str, str]]] = collections.defaultdict(list)
-    seen_wa: set[tuple[str, str]] = set()
+    corpus_ids: set[str] = {w["id"] for w in works if w.get("id")}
+
+    # ── Work metadata ─────────────────────────────────────────────────────────
+    work_year  = {w["id"]: w["publication_year"] for w in works
+                  if w.get("id") and w.get("publication_year") is not None}
+    work_title = {w["id"]: (w.get("title") or "").strip()[:150] for w in works
+                  if w.get("id") and w.get("title")}
+
+    # ── Work-author table (deduplicated) ──────────────────────────────────────
+    seen_wa: set[tuple] = set()
+    wa_rows = []
     for r in rows:
-        wid = r["work_id"]
-        aid = r.get("author_id") or ""
+        wid   = r["work_id"]
+        aid   = r.get("author_id") or ""
         aname = r.get("author_name") or ""
         if not aid:
             continue
         key = (wid, aid)
         if key not in seen_wa:
             seen_wa.add(key)
-            work_authors[wid].append((aid, aname))
+            wa_rows.append((wid, aid, aname))
+    del seen_wa
 
-    work_edge_set: set[tuple[str, str]] = set()
-    for work in works:
-        citing_id = work.get("id", "")
-        if not citing_id:
-            continue
-        for ref_id in (work.get("referenced_works") or []):
-            if ref_id in corpus_ids and ref_id != citing_id:
-                work_edge_set.add((citing_id, ref_id))
+    wa = _pd.DataFrame(wa_rows, columns=["work_id", "author_id", "author_name"])
+    del wa_rows
 
-    work_edges = [
-        {"citing_work_id": c, "cited_work_id": d}
-        for c, d in sorted(work_edge_set)
-    ]
-
-    author_edge_count: dict[tuple[str, str], int] = collections.defaultdict(int)
-    author_edge_names: dict[tuple[str, str], tuple[str, str]] = {}
-    author_edge_year_count: dict[tuple[str, str, int], int] = collections.defaultdict(int)
-    author_edge_papers_set: dict[tuple[str, str], set] = collections.defaultdict(set)
-
-    # For large consortium papers, restrict to first+last author to avoid O(n²) explosion
+    # Cap large-consortium papers to first + last author
     _MAX_AUTHORS = 20
+    sz = wa.groupby("work_id")["author_id"].transform("size")
+    large = sz > _MAX_AUTHORS
+    if large.any():
+        rank     = wa.groupby("work_id").cumcount()
+        last_pos = sz - 1
+        wa = wa[~large | (rank == 0) | (rank == last_pos)].copy()
 
-    def _representative_authors(wid):
-        authors = work_authors.get(wid, [])
-        if len(authors) <= _MAX_AUTHORS:
-            return authors
-        return [authors[0], authors[-1]]
+    # ── Work citation edges ───────────────────────────────────────────────────
+    cite_rows = []
+    for work in works:
+        cid = work.get("id", "")
+        if not cid:
+            continue
+        for ref in (work.get("referenced_works") or []):
+            if ref in corpus_ids and ref != cid:
+                cite_rows.append((cid, ref))
 
-    for citing_id, cited_id in work_edge_set:
-        year          = work_year.get(citing_id)
-        citing_title  = work_title.get(citing_id, "")
-        citing_authors = _representative_authors(citing_id)
-        cited_authors  = _representative_authors(cited_id)
-        for ca_id, ca_name in citing_authors:
-            for cd_id, cd_name in cited_authors:
-                if ca_id == cd_id:
-                    continue
-                key = (ca_id, cd_id)
-                author_edge_count[key] += 1
-                if key not in author_edge_names:
-                    author_edge_names[key] = (ca_name, cd_name)
-                if year is not None:
-                    author_edge_year_count[(ca_id, cd_id, year)] += 1
-                if citing_title:
-                    author_edge_papers_set[key].add(citing_title)
+    if not cite_rows:
+        return [], [], [], []
 
-    author_edges = []
-    for (ca_id, cd_id), count in sorted(author_edge_count.items(), key=lambda x: -x[1]):
-        ca_name, cd_name = author_edge_names[(ca_id, cd_id)]
-        author_edges.append({
-            "citing_author_id":   ca_id,
-            "citing_author_name": ca_name,
-            "cited_author_id":    cd_id,
-            "cited_author_name":  cd_name,
-            "citations":          count,
-        })
+    we = _pd.DataFrame(cite_rows, columns=["citing_work_id", "cited_work_id"]).drop_duplicates()
+    del cite_rows
+    we["year"]  = we["citing_work_id"].map(work_year)
+    we["title"] = we["citing_work_id"].map(work_title).fillna("")
+    log.info("  Work-level citation edges: %d — expanding to author edges…", len(we))
 
-    author_edges_by_year = []
-    for (ca_id, cd_id, year), count in sorted(
-        author_edge_year_count.items(), key=lambda x: (x[0][2], -x[1])
-    ):
-        ca_name, cd_name = author_edge_names.get((ca_id, cd_id), ("", ""))
-        author_edges_by_year.append({
-            "citing_author_id":   ca_id,
-            "citing_author_name": ca_name,
-            "cited_author_id":    cd_id,
-            "cited_author_name":  cd_name,
-            "year":               year,
-            "citations":          count,
-        })
+    # Save work edges before we enrich/delete the DataFrame
+    work_edges = (we[["citing_work_id", "cited_work_id"]]
+                  .sort_values(["citing_work_id", "cited_work_id"])
+                  .to_dict(orient="records"))
 
-    author_edges_papers = [
-        {"citing_author_id": ca_id, "cited_author_id": cd_id,
-         "citing_titles": "; ".join(sorted(titles)[:5])}
-        for (ca_id, cd_id), titles in sorted(author_edge_papers_set.items())
-        if titles
-    ]
+    # ── Expand to author pairs via merge ──────────────────────────────────────
+    ca = wa.rename(columns={"work_id": "citing_work_id",
+                             "author_id": "citing_author_id",
+                             "author_name": "citing_author_name"})
+    cd = wa.rename(columns={"work_id": "cited_work_id",
+                             "author_id": "cited_author_id",
+                             "author_name": "cited_author_name"})
+    del wa
+
+    ae = (we.merge(ca, on="citing_work_id", how="inner")
+            .merge(cd, on="cited_work_id",  how="inner"))
+    ae = ae[ae["citing_author_id"] != ae["cited_author_id"]]
+    del we, ca, cd
+    log.info("  Author-level pairs: %d — aggregating…", len(ae))
+
+    # First-occurrence names per pair
+    names = (ae.drop_duplicates(subset=["citing_author_id", "cited_author_id"])
+               [["citing_author_id", "cited_author_id",
+                 "citing_author_name", "cited_author_name"]])
+
+    # ── Author edges (total citation count) ──────────────────────────────────
+    cnt = (ae.groupby(["citing_author_id", "cited_author_id"], sort=False)
+             .size().reset_index(name="citations"))
+    cnt = cnt.merge(names, on=["citing_author_id", "cited_author_id"], how="left")
+    cnt.sort_values("citations", ascending=False, inplace=True)
+    author_edges = cnt.to_dict(orient="records")
+    del cnt
+
+    # ── Author edges by year ──────────────────────────────────────────────────
+    ae_yr = ae.loc[ae["year"].notna(), ["citing_author_id", "cited_author_id", "year"]].copy()
+    ae_yr["year"] = ae_yr["year"].astype(int)
+    yr = (ae_yr.groupby(["citing_author_id", "cited_author_id", "year"], sort=False)
+               .size().reset_index(name="citations"))
+    yr = yr.merge(names, on=["citing_author_id", "cited_author_id"], how="left")
+    yr.sort_values(["year", "citations"], ascending=[True, False], inplace=True)
+    author_edges_by_year = yr.to_dict(orient="records")
+    del ae_yr, yr
+
+    # ── Author edges with paper titles ───────────────────────────────────────
+    ae_t = ae.loc[ae["title"] != "", ["citing_author_id", "cited_author_id", "title"]]
+    papers = (ae_t.groupby(["citing_author_id", "cited_author_id"], sort=False)["title"]
+                  .apply(lambda x: "; ".join(sorted(set(x))[:5]))
+                  .reset_index(name="citing_titles"))
+    author_edges_papers = papers.to_dict(orient="records")
+    del ae, ae_t, papers, names
 
     return work_edges, author_edges, author_edges_by_year, author_edges_papers
 
@@ -1531,22 +1537,26 @@ def main() -> None:
     session = _session()
     prefix  = _CFG.get("prefix", "")
 
-    def _pf(name: str) -> str:
-        return name
+    data_dir = os.path.join(DEFAULT_DATA_DIR, prefix) if prefix else DEFAULT_DATA_DIR
 
     def _out(name: str) -> str:
-        return os.path.join(args.output_dir, _pf(name))
+        return os.path.join(args.output_dir, name)
+
+    def _data(name: str) -> str:
+        return os.path.join(data_dir, name)
 
     log.info("Search terms: %s", args.terms)
     log.info("Output dir  : %s", args.output_dir)
+    log.info("Data dir    : %s", data_dir)
     log.info("Prefix      : %s", prefix or "(none)")
     if args.dry_run:
         log.info("DRY RUN — only first 2 pages will be fetched")
 
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
 
     if args.from_checkpoint:
-        works_file = _out("fetch_checkpoint") + ".jsonl"
+        works_file = _data("fetch_checkpoint") + ".jsonl"
         if not os.path.exists(works_file):
             log.error("No checkpoint file found at %s", works_file)
             sys.exit(1)
@@ -1555,7 +1565,7 @@ def main() -> None:
             works = [json.loads(ln) for ln in fh if ln.strip()]
         log.info("Loaded %d works from checkpoint (fetch still in progress — checkpoint preserved)", len(works))
     else:
-        checkpoint_path = None if args.dry_run else _out("fetch_checkpoint")
+        checkpoint_path = None if args.dry_run else _data("fetch_checkpoint")
         works = fetch_all_works(args.terms, session, dry_run=args.dry_run,
                                 checkpoint_path=checkpoint_path)
 

@@ -1159,14 +1159,21 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
 </div>"""
 
     # Search data
-    # Build PageRank lookup from citation-network centrality if available
+    # Build PageRank lookup from citation-network centrality (keyed by author_id for reliability)
     _pr_lookup = {}
     if citation_cent_df is not None and "pagerank" in citation_cent_df.columns:
-        for _, _r in citation_cent_df.iterrows():
-            _pr_lookup[str(_r.get("author_name", ""))] = float(_r.get("pagerank", 0))
+        if "author_id" in citation_cent_df.columns:
+            for _, _r in citation_cent_df.iterrows():
+                _pr_lookup[str(_r.get("author_id", ""))] = float(_r.get("pagerank", 0))
+        else:
+            for _, _r in citation_cent_df.iterrows():
+                _pr_lookup[str(_r.get("author_name", ""))] = float(_r.get("pagerank", 0))
+
+    _use_id_lookup = (citation_cent_df is not None and bool(_pr_lookup)
+                      and "author_id" in citation_cent_df.columns)
 
     search_authors = (
-        centrality_df[["name","institution","country","papers","citations",
+        centrality_df[["author_id","name","institution","country","papers","citations",
                         "degree","betweenness","community_label"]]
         .fillna("").rename(columns={"name":"Author","institution":"Institution",
                                      "country":"Country","papers":"Papers",
@@ -1177,7 +1184,8 @@ def build_html(dashboard_figures, centrality_df, institutions_df, country_df,
     )
     for r in search_authors:
         r["Betweenness"] = round(float(r["Betweenness"]), 4)
-        r["PageRank"] = round(_pr_lookup.get(r["Author"], 0), 6)
+        _pr_key = r.get("author_id", "") if _use_id_lookup else r["Author"]
+        r["PageRank"] = round(_pr_lookup.get(str(_pr_key), 0), 6)
     search_inst = (
         institutions_df[["institution","country","papers","citations"]].fillna("")
         .rename(columns={"institution":"Institution","country":"Country",

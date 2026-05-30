@@ -285,22 +285,21 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
     n_nodes = len(node_ids)
     n_edges = G_plot.number_of_edges()
 
-    pr_vals = list(pagerank.values())
-    pr_min, pr_max = (min(pr_vals), max(pr_vals)) if pr_vals else (0, 1)
-
-    # Node sizes: small enough that 500 visible nodes don't overlap.
-    # Use sqrt scaling so a few high-degree hubs stand out without dominating.
+    # Node sizes: sqrt + 95th-percentile normalisation for both metrics so the
+    # distribution fills the 3–6 px range rather than compressing to the minimum.
     indeg_vals = [indegree_map.get(nid, 0) for nid in node_ids]
     indeg_p95  = sorted(indeg_vals)[int(len(indeg_vals) * 0.95)] if indeg_vals else 1
 
+    pr_vals_local = [pagerank.get(nid, 0) for nid in node_ids]
+    pr_p95 = sorted(pr_vals_local)[int(len(pr_vals_local) * 0.95)] if pr_vals_local else 1e-9
+
     def _indeg_sz(indeg):
         t = min(1.0, (indeg ** 0.5) / max(1, indeg_p95 ** 0.5))
-        return round(4 + 12 * t, 2)   # 4 px baseline, 16 px max
+        return round(3 + 3 * t, 2)   # 3 px baseline, 6 px max
 
     def _pr_sz(pr):
-        if pr_max == pr_min:
-            return 8
-        return round(4 + 12 * (pr - pr_min) / (pr_max - pr_min), 2)
+        t = min(1.0, (pr ** 0.5) / max(1e-12, pr_p95 ** 0.5))
+        return round(3 + 3 * t, 2)
 
     # Country colours
     ctrs_all = [(author_lookup.get(nid, {}).get("country") or "—") for nid in node_ids]
@@ -317,12 +316,12 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
         t = min(1.0, n / p_max) if p_max else 0
         return f"rgb({int(210 - 160 * t)},{int(225 - 170 * t)},{int(255 - 60 * t)})"
 
-    # Edge width 0.8–5 px, proportional to weight
+    # Edge width 0.15–0.35 px — very thin lines for a clean look
     all_w = [G_plot[u][v].get("weight", 1) for u, v in G_plot.edges()]
     w_max_e = max(all_w) if all_w else 1
 
     def _ewidth(w):
-        return round(0.8 + 4.2 * min(1.0, (w - 1) / max(1, w_max_e - 1)), 2)
+        return round(0.15 + 0.20 * min(1.0, (w - 1) / max(1, w_max_e - 1)), 2)
 
     recip_set = {(u, v) for u, v in G_plot.edges() if G_plot.has_edge(v, u)}
     node_id_to_idx = {nid: i for i, nid in enumerate(node_ids)}
@@ -369,7 +368,7 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
                 "colorPapers":    _pcol(papers_n),
                 "colorSubclass":  SUBCLASS_COLORS.get(sc, "#bbbbbb"),
                 "sizeIndeg": _indeg_sz(indegree_map.get(nid, 0)),
-                "sizePR":    _pr_sz(pagerank.get(nid, pr_min)),
+                "sizePR":    _pr_sz(pagerank.get(nid, 0.0)),
                 "shape":     SUBCLASS_SHAPES.get(sc, "ellipse"),
                 "rank":      i + 1,
             },
@@ -380,8 +379,19 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
         })
 
     # ── Edges ─────────────────────────────────────────────────────────────────
+    # Keep only top-5 outgoing edges per node by weight to reduce visual clutter
+    _node_top: dict = defaultdict(list)
+    for u, v in G_plot.edges():
+        _node_top[u].append((G_plot[u][v].get("weight", 1), v))
+    _allowed_edges: set = set()
+    for u, edges in _node_top.items():
+        for _w, v in sorted(edges, reverse=True)[:5]:
+            _allowed_edges.add((u, v))
+
     cy_edges = []
     for u, v in G_plot.edges():
+        if (u, v) not in _allowed_edges:
+            continue
         ui = node_id_to_idx[u]; vi = node_id_to_idx[v]
         w = G_plot[u][v].get("weight", 1)
         cy_edges.append({
@@ -525,20 +535,15 @@ var CY_STYLE = [
   {selector:'edge.inf-faded',style:{'opacity':0.04}},
   {selector:'edge', style:{
     'width':'data(width)',
-    'line-color':'rgba(120,120,120,0.3)',
-    'target-arrow-color':'rgba(120,120,120,0.35)',
-    'target-arrow-shape':'triangle',
-    'arrow-scale':0.6,
-    'curve-style':'bezier',
+    'line-color':'rgba(100,100,100,0.15)',
+    'target-arrow-shape':'none',
+    'curve-style':'straight',
   }},
   {selector:'edge[?recip]', style:{
-    'line-color':'rgba(210,95,30,0.5)',
-    'target-arrow-color':'rgba(210,95,30,0.55)',
-    'source-arrow-shape':'triangle',
-    'source-arrow-color':'rgba(210,95,30,0.55)',
+    'line-color':'rgba(190,80,20,0.30)',
   }},
   {selector:'edge.faded',    style:{'opacity':0.04}},
-  {selector:'edge.path-edge',style:{'line-color':'#27ae60','target-arrow-color':'#27ae60','width':3,'z-index':99}},
+  {selector:'edge.path-edge',style:{'line-color':'#27ae60','width':2,'z-index':99}},
 ];
 
 function initCy() {
@@ -550,14 +555,23 @@ function initCy() {
     minZoom:0.04, maxZoom:8,
     boxSelectionEnabled:false,
     selectionType:'single',
-    pixelRatio: 'auto',
+    pixelRatio: 1,
+    hideEdgesOnViewport: true,
+    textureOnViewport: true,
+    motionBlur: false,
   });
-  cy.nodes().sort(function(a,b){return b.data('indeg')-a.data('indeg');}).slice(0,30).addClass('labeled');
+  // Labels shown on hover only — no permanent labels at init
   cy.on('tap','node',  function(e){ selectNode(e.target); });
   cy.on('tap','edge',  function(e){ openEdgePopup(e.target); });
   cy.on('tap',         function(e){ if(e.target===cy) resetAll(); });
-  cy.on('mouseover','node', function(e){ e.target.addClass('hovered'); });
-  cy.on('mouseout', 'node', function(e){ e.target.removeClass('hovered'); });
+  function _labelFs() { return 11 / Math.max(0.05, cy.zoom()); }
+  function _updateLabeledFs() {
+    var fs = _labelFs();
+    cy.nodes('.hovered,.labeled,.ego,.path-node,.funder-match,.inf-seed,.inf-dn1,.inf-up1').style('font-size', fs);
+  }
+  cy.on('mouseover','node', function(e){ e.target.style('font-size', _labelFs()).addClass('hovered'); });
+  cy.on('mouseout', 'node', function(e){ e.target.removeStyle('font-size').removeClass('hovered'); });
+  cy.on('zoom', _updateLabeledFs);
   // Hide nodes beyond DEFAULT_DISPLAY initially
   cy.batch(function() {
     cy.nodes().forEach(function(n) {
@@ -1279,14 +1293,14 @@ def main():
                     edge_papers_map[(ca, cd)] = [t.strip() for t in ts.split(";") if t.strip()]
         print(f"  Edge-papers after filter: {len(edge_papers_map):,} edges with title data")
 
-    G_undirected = G_plot.to_undirected()
+    G_undirected = nx.Graph(G_plot)   # shallow copy — avoids deepcopy of each edge dict
 
     print("Detecting communities…")
     partition     = _community_partition(G_undirected)
     n_communities = len(set(partition.values()))
 
     print("Computing layout…")
-    pos = nx.spring_layout(G_undirected, weight="weight", seed=LAYOUT_SEED, k=0.8)
+    pos = nx.spring_layout(G_undirected, weight="weight", seed=LAYOUT_SEED, k=1.8, iterations=80)
 
     indegree_map = dict(G_plot.in_degree())
 
@@ -1294,11 +1308,10 @@ def main():
     print("Computing PageRank…")
     pagerank = nx.pagerank(G_plot, weight="weight")
     pr_vals  = list(pagerank.values())
-    pr_min, pr_max = min(pr_vals), max(pr_vals)
+    pr_p95_global = sorted(pr_vals)[int(len(pr_vals) * 0.95)] if pr_vals else 1e-9
     def _pr_size(pr):
-        if pr_max == pr_min:
-            return 10
-        return round(5 + 17 * (pr - pr_min) / (pr_max - pr_min), 3)
+        t = min(1.0, (pr ** 0.5) / max(1e-12, pr_p95_global ** 0.5))
+        return round(5 + 17 * t, 3)   # 5 px baseline, 22 px max
 
     # ── Betweenness centrality (approximated for large graphs) ───────────────
     n_nodes_bet = G_plot.number_of_nodes()
@@ -1339,7 +1352,7 @@ def main():
     )
 
     sizes_indeg = [max(5, min(22, 5 + indegree_map.get(nid, 0) * 0.6)) for nid in node_ids]
-    sizes_pr    = [_pr_size(pagerank.get(nid, pr_min)) for nid in node_ids]
+    sizes_pr    = [_pr_size(pagerank.get(nid, 0.0)) for nid in node_ids]
 
     node_meta = [
         {
