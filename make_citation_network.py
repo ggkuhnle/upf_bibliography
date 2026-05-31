@@ -1265,10 +1265,32 @@ def main():
     indegree_all = dict(G_plot.in_degree())
     print(f"  Graph after load: {G_plot.number_of_nodes()} nodes, {G_plot.number_of_edges()} edges")
 
-    # Safety cap
+    # ── Full-graph PageRank + degrees → author_centrality.csv ───────────────────
+    # Computed BEFORE the visualisation cap so the CSV covers all authors.
+    print("Computing PageRank on full graph…")
+    pagerank_full   = nx.pagerank(G_plot, weight="weight")
+    indegree_full   = dict(G_plot.in_degree())
+    outdegree_full  = dict(G_plot.out_degree())
+
+    print(f"Exporting author centrality CSV ({G_plot.number_of_nodes():,} authors)…")
+    cent_rows_full = []
+    for nid in G_plot.nodes():
+        meta = author_lookup.get(nid, {})
+        cent_rows_full.append({
+            "author_id":   nid,
+            "author_name": meta.get("author_name", ""),
+            "pagerank":    pagerank_full.get(nid, 0.0),
+            "betweenness": 0.0,   # filled in below for top nodes
+            "indegree":    indegree_full.get(nid, 0),
+            "outdegree":   outdegree_full.get(nid, 0),
+        })
+    cent_df_full = pd.DataFrame(cent_rows_full).sort_values("pagerank", ascending=False)
+    cent_path = os.path.join(data, _pf("author_centrality.csv"))
+
+    # Safety cap — applies only to visualisation outputs
     if G_plot.number_of_nodes() > TOP_NODES:
-        print(f"  Applying safety cap at {TOP_NODES} nodes…")
-        top_nodes = sorted(indegree_all, key=lambda n: indegree_all[n], reverse=True)[:TOP_NODES]
+        print(f"  Applying visualisation cap at {TOP_NODES} nodes…")
+        top_nodes = sorted(indegree_full, key=lambda n: indegree_full[n], reverse=True)[:TOP_NODES]
         G_plot = G_plot.subgraph(top_nodes).copy()
         indegree_all = dict(G_plot.in_degree())
     node_set = set(G_plot.nodes())
@@ -1304,43 +1326,30 @@ def main():
 
     indegree_map = dict(G_plot.in_degree())
 
-    # ── PageRank ──────────────────────────────────────────────────────────────
-    print("Computing PageRank…")
-    pagerank = nx.pagerank(G_plot, weight="weight")
+    # ── PageRank for visualisation (reuse full-graph values) ─────────────────
+    pagerank = pagerank_full   # same dict, already computed on full graph
     pr_vals  = list(pagerank.values())
     pr_p95_global = sorted(pr_vals)[int(len(pr_vals) * 0.95)] if pr_vals else 1e-9
     def _pr_size(pr):
         t = min(1.0, (pr ** 0.5) / max(1e-12, pr_p95_global ** 0.5))
-        return round(5 + 17 * t, 3)   # 5 px baseline, 22 px max
+        return round(5 + 17 * t, 3)
 
-    # ── Betweenness centrality (approximated for large graphs) ───────────────
+    # ── Betweenness centrality (approximated, on capped graph only) ──────────
     n_nodes_bet = G_plot.number_of_nodes()
-    k_sample = min(n_nodes_bet, 500)  # sample at most 500 pivots
+    k_sample = min(n_nodes_bet, 500)
     if k_sample < n_nodes_bet:
-        print(f"Computing betweenness centrality (approx, k={k_sample})…")
+        print(f"Computing betweenness centrality (approx, k={k_sample}, top {n_nodes_bet} nodes)…")
     else:
         print("Computing betweenness centrality (exact)…")
     betweenness = nx.betweenness_centrality(G_plot, k=k_sample, normalized=True, weight="weight")
 
-    # ── Export author centrality CSV ──────────────────────────────────────────
-    print("Exporting author centrality CSV…")
-    indegree_dict  = dict(G_plot.in_degree())
-    outdegree_dict = dict(G_plot.out_degree())
-    centrality_rows = []
-    for nid in G_plot.nodes():
-        meta = author_lookup.get(nid, {})
-        centrality_rows.append({
-            "author_id":   nid,
-            "author_name": meta.get("author_name", ""),
-            "pagerank":    pagerank.get(nid, 0.0),
-            "betweenness": betweenness.get(nid, 0.0),
-            "indegree":    indegree_dict.get(nid, 0),
-            "outdegree":   outdegree_dict.get(nid, 0),
-        })
-    cent_df = pd.DataFrame(centrality_rows).sort_values("pagerank", ascending=False)
-    cent_path = os.path.join(data, _pf("author_centrality.csv"))
-    cent_df.to_csv(cent_path, index=False)
-    print(f"Saved → {cent_path}  ({len(cent_df):,} authors)")
+    # Merge betweenness into full CSV and save
+    bet_series = pd.Series(betweenness, name="betweenness")
+    cent_df_full = cent_df_full.set_index("author_id")
+    cent_df_full.update(bet_series.rename("betweenness"))
+    cent_df_full = cent_df_full.reset_index().sort_values("pagerank", ascending=False)
+    cent_df_full.to_csv(cent_path, index=False)
+    print(f"Saved → {cent_path}  ({len(cent_df_full):,} authors)")
 
     # ── Node-level data for JS ────────────────────────────────────────────────
     # node_ids order comes from fig_citation_network; we compute it here first

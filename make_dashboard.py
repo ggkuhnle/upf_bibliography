@@ -53,12 +53,14 @@ def parse_args():
                    help="Run bibliometrics.py first to update CSVs, then rebuild charts.")
     return p.parse_args()
 
-MIN_PAPERS      = 3
-MIN_EDGE_WEIGHT = 2
-TOP_N_LABELS    = 30
-TOP_N_RANKING   = 25
-LAYOUT_SEED     = 42
-PLOT_CAP        = 500
+MIN_PAPERS       = 3
+MIN_EDGE_WEIGHT  = 2
+TOP_N_LABELS     = 30
+TOP_N_RANKING    = 25
+LAYOUT_SEED      = 42
+PLOT_CAP         = 500
+BETWEENNESS_K    = 500    # approximate betweenness sample; None = exact (slow on large graphs)
+MAX_ANALYSIS_NODES = 20_000  # cap LCC before centrality/community — avoids OOM on large corpora
 
 SC_COLORS = {
     "Flavan-3-ol":  "#636EFA",
@@ -109,8 +111,14 @@ DISCLAIMER = (
 
 def load_data(out, data):
     print("Loading CSVs…")
-    edges_df       = pd.read_csv(os.path.join(data, _pf("coauthorship_edges.csv")))
-    authors_df     = pd.read_csv(os.path.join(data, _pf("papers_by_author.csv")))
+    edges_df       = pd.read_csv(os.path.join(data, _pf("coauthorship_edges.csv")),
+                                 usecols=["author1_id", "author2_id", "shared_papers"],
+                                 dtype={"author1_id": str, "author2_id": str,
+                                        "shared_papers": "int32"})
+    authors_df     = pd.read_csv(os.path.join(data, _pf("papers_by_author.csv")),
+                                 usecols=["author_id", "author_name", "institution",
+                                          "country", "papers", "citations"],
+                                 dtype={"author_id": str})
     institutions_df = pd.read_csv(os.path.join(data, _pf("papers_by_institution.csv")))
     institutions_df = institutions_df[
         institutions_df["institution"].notna() & (institutions_df["institution"] != "")
@@ -127,7 +135,9 @@ def load_data(out, data):
     year_df         = pd.read_csv(os.path.join(data, _pf("papers_by_year.csv")))
     country_year_df = pd.read_csv(os.path.join(data, _pf("papers_by_country_year.csv")))
     net_metrics_df  = pd.read_csv(os.path.join(data, _pf("network_metrics_by_year.csv")))
-    edges_yr_df     = pd.read_csv(os.path.join(data, _pf("coauthorship_edges_by_year.csv")))
+    edges_yr_df     = pd.read_csv(os.path.join(data, _pf("coauthorship_edges_by_year.csv")),
+                                  usecols=["author1_id", "author2_id", "year"],
+                                  dtype={"author1_id": str, "author2_id": str})
     country_df      = pd.read_csv(os.path.join(data, _pf("papers_by_country.csv")))
     country_df      = country_df[country_df["country"].notna() & (country_df["country"] != "")].copy()
 
@@ -187,17 +197,22 @@ def build_graph(edges_df, authors_df):
         .first()[["author_name", "institution", "country", "papers", "citations"]]
         .to_dict(orient="index")
     )
-    core_authors = {aid for aid, a in node_attrs.items() if a["papers"] >= MIN_PAPERS}
+    core_authors = set(
+        authors_df.loc[authors_df["papers"] >= MIN_PAPERS, "author_id"]
+    )
 
-    G = nx.Graph()
-    for _, row in edges_df.iterrows():
-        a1, a2, w = row["author1_id"], row["author2_id"], row["shared_papers"]
-        if a1 not in core_authors or a2 not in core_authors or w < MIN_EDGE_WEIGHT:
-            continue
-        if G.has_edge(a1, a2):
-            G[a1][a2]["weight"] += w
-        else:
-            G.add_edge(a1, a2, weight=w)
+    # Vectorised filter — avoids iterrows() on millions of edges
+    filt = edges_df[
+        edges_df["author1_id"].isin(core_authors) &
+        edges_df["author2_id"].isin(core_authors) &
+        (edges_df["shared_papers"] >= MIN_EDGE_WEIGHT)
+    ].rename(columns={"shared_papers": "weight"})
+    print(f"  {len(filt):,} edges after filter (from {len(edges_df):,})")
+
+    G = nx.from_pandas_edgelist(
+        filt, source="author1_id", target="author2_id",
+        edge_attr="weight", create_using=nx.Graph()
+    )
 
     for node in G.nodes():
         a = node_attrs.get(node, {})
@@ -209,8 +224,17 @@ def build_graph(edges_df, authors_df):
 
     lcc_nodes = max(nx.connected_components(G), key=len)
     G_lcc = G.subgraph(lcc_nodes).copy()
+    lcc_n = G_lcc.number_of_nodes()
     print(f"  Full graph: {G.number_of_nodes():,} nodes  LCC: "
-          f"{G_lcc.number_of_nodes():,} nodes, {G_lcc.number_of_edges():,} edges")
+          f"{lcc_n:,} nodes, {G_lcc.number_of_edges():,} edges")
+
+    if lcc_n > MAX_ANALYSIS_NODES:
+        print(f"  LCC exceeds {MAX_ANALYSIS_NODES:,} — capping to top nodes by degree…")
+        top = sorted(G_lcc.nodes(), key=lambda n: G_lcc.degree(n), reverse=True)[:MAX_ANALYSIS_NODES]
+        G_lcc = G_lcc.subgraph(top).copy()
+        print(f"  Analysis graph: {G_lcc.number_of_nodes():,} nodes, "
+              f"{G_lcc.number_of_edges():,} edges")
+
     return G, G_lcc, node_attrs
 
 
@@ -218,10 +242,15 @@ def build_graph(edges_df, authors_df):
 
 def compute_centrality(G_lcc):
     print("Computing centrality…")
+    n = G_lcc.number_of_nodes()
     degree_cent = nx.degree_centrality(G_lcc)
-    betweenness = nx.betweenness_centrality(G_lcc, weight="weight", normalized=True)
     pagerank    = nx.pagerank(G_lcc, weight="weight")
     clustering  = nx.clustering(G_lcc, weight="weight")
+    k_approx = BETWEENNESS_K if n > BETWEENNESS_K else None
+    if k_approx:
+        print(f"  betweenness: approximate (k={k_approx}) on {n:,} nodes…")
+    betweenness = nx.betweenness_centrality(G_lcc, weight="weight",
+                                            normalized=True, k=k_approx)
 
     df = pd.DataFrame({
         "author_id":          list(G_lcc.nodes()),
