@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 make_author_report.py
-Generate a bespoke author profile: HTML (interactive) + LaTeX/PDF (print-ready).
+Generate a bespoke author profile (HTML, interactive).
 
 Reads existing CSVs — no re-fetching needed.
-LLM text via Ollama (local model, e.g. llama3.2); gracefully skipped if not running.
+LLM text via Ollama (local model, e.g. llama3.1); gracefully skipped if not running.
 
 Usage:
   python make_author_report.py --author "Hollman"
@@ -17,17 +17,11 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.request
 import urllib.error
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import networkx as nx
-import numpy as np
 import pandas as pd
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -40,32 +34,23 @@ DEFAULT_DATA_BASE = "data"
 OLLAMA_URL        = "http://localhost:11434/api/generate"
 DEFAULT_LLM_MODEL = "llama3.1"
 
-# ── LaTeX escaping ────────────────────────────────────────────────────────────
-
-_LATEX_SPECIAL = {
-    '\\': r'\textbackslash{}', '&': r'\&', '%': r'\%', '$': r'\$',
-    '#':  r'\#', '_': r'\_', '{': r'\{', '}': r'\}',
-    '~':  r'\textasciitilde{}', '^': r'\textasciicircum{}',
-}
-
-def _ltx(s):
-    if s is None:
-        return ""
-    return re.sub(r'[\\&%$#_{}~^]', lambda m: _LATEX_SPECIAL[m.group()], str(s))
-
-
 # ── Config ────────────────────────────────────────────────────────────────────
 
 def _load_cfg(extra_dir=None):
-    candidates = []
-    if extra_dir:
-        candidates.append(os.path.join(extra_dir, "config.json"))
-    candidates += [os.path.join(os.path.dirname(__file__), "config.json"), "config.json"]
-    for p in candidates:
+    """Load config, merging project-level and dataset-level files.
+    Dataset-level keys (extra_dir/config.json) override project-level ones."""
+    def _read(p):
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
                 return json.load(f)
-    return {}
+        return {}
+
+    project_cfg = _read(os.path.join(os.path.dirname(__file__), "config.json")) or \
+                  _read("config.json")
+    if extra_dir:
+        local_cfg = _read(os.path.join(extra_dir, "config.json"))
+        return {**project_cfg, **local_cfg}
+    return project_cfg
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -447,67 +432,6 @@ def _plotly_citation_ego_html(G, focal_id, title):
     return fig.to_html(full_html=False, include_plotlyjs=False)
 
 
-# ── Matplotlib figures (LaTeX PDF) ────────────────────────────────────────────
-
-def _mpl_coauthor(G, focal_id, ax, title):
-    ax.axis("off")
-    ax.set_title(title, fontsize=8, pad=3)
-    if G.number_of_nodes() == 0:
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        return
-    pos = nx.spring_layout(G, weight="weight", seed=42, k=1.5)
-    w_max = max((G[u][v].get("weight", 1) for u, v in G.edges()), default=1)
-    for u, v in G.edges():
-        t = min(1.0, G[u][v].get("weight", 1) / w_max)
-        ax.plot([pos[u][0], pos[v][0]], [pos[u][1], pos[v][1]],
-                color="#aaaaaa", alpha=0.2 + 0.45 * t, lw=0.3 + 1.2 * t, zorder=1)
-    for nid in G.nodes():
-        x, y = pos[nid]
-        focal = (nid == focal_id)
-        ax.scatter(x, y, s=180 if focal else 40, zorder=2,
-                   c="#EF553B" if focal else "#636EFA",
-                   marker="*" if focal else "o",
-                   linewidths=0.6, edgecolors="white")
-        ax.text(x, y + 0.055, _short(_name(G, nid)),
-                fontsize=3.8 if not focal else 5.0,
-                fontweight="bold" if focal else "normal",
-                ha="center", va="bottom", zorder=3,
-                bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.7))
-
-
-def _mpl_citation_ego(G, focal_id, ax, title):
-    ax.axis("off")
-    ax.set_title(title, fontsize=8, pad=3)
-    if G.number_of_nodes() == 0:
-        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        return
-    G_u = nx.Graph(G)
-    pos = nx.spring_layout(G_u, seed=42, k=1.5)
-    for u, v in G.edges():
-        color = "#c0392b" if v == focal_id else "#2980b9"
-        ax.annotate("", xy=pos[v], xytext=pos[u],
-                    arrowprops=dict(arrowstyle="-|>", color=color,
-                                   lw=0.5, alpha=0.5, mutation_scale=7), zorder=1)
-    role_c = {"focal": "#EF553B", "cited_by_focal": "#00CC96", "cites_focal": "#AB63FA"}
-    for nid in G.nodes():
-        x, y = pos[nid]
-        focal = (nid == focal_id)
-        c = role_c.get(G.nodes[nid].get("role", ""), "#636EFA")
-        ax.scatter(x, y, s=180 if focal else 35, zorder=2, c=c,
-                   marker="*" if focal else "o",
-                   linewidths=0.6, edgecolors="white")
-        ax.text(x, y + 0.055, _short(_name(G, nid)),
-                fontsize=3.8 if not focal else 5.0,
-                fontweight="bold" if focal else "normal",
-                ha="center", va="bottom", zorder=3,
-                bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.7))
-    ax.legend(handles=[
-        mpatches.Patch(color="#00CC96", label="Author cites →"),
-        mpatches.Patch(color="#AB63FA", label="← Cites author"),
-        mpatches.Patch(color="#EF553B", label="Author"),
-    ], loc="lower right", fontsize=4, framealpha=0.85)
-
-
 # ── LLM via Ollama ────────────────────────────────────────────────────────────
 
 def generate_llm_text(stats, papers, model=DEFAULT_LLM_MODEL):
@@ -524,25 +448,37 @@ def generate_llm_text(stats, papers, model=DEFAULT_LLM_MODEL):
         v = stats.get(key, "")
         return f"{v}%" if v != "" else "n/a"
 
-    prompt = f"""Write a concise academic profile (2–3 paragraphs) for an author report.
-Be factual; use only the data provided; third person; no invented details.
+    stype_str = ", ".join(
+        f"{r.get('Study type', r.get('study_type','?'))} ({r['papers']})"
+        for r in stats.get("study_type_breakdown", [])[:4])
 
+    prompt = f"""You are writing a short academic profile for an author report in the field of {field}.
+The entire report concerns research on {field} specifically — every sentence must reflect that context.
+Write 2–3 paragraphs, third person, factual, no invented details beyond what is given.
+Start the first paragraph with the author's name and their standing in the {field} literature.
+
+--- Data ---
 Author: {name}
 Institution: {inst}{(', ' + country) if country else ''}
-Field: {field}
-Papers: {stats.get('papers','?')}  Citations: {stats.get('citations','?')}
-Network influence — PageRank percentile: {_pct('pagerank_pct')}
-Network bridging — betweenness percentile: {_pct('betweenness_pct')}
+Research field (this report's scope): {field}
+{('Subfields within ' + field + ': ' + sub_str) if sub_str else ''}
+{('Study types: ' + stype_str) if stype_str else ''}
+Total papers (in {field}): {stats.get('papers','?')}
+Total citations (in {field}): {stats.get('citations','?')}
+PageRank percentile in {field} network: {_pct('pagerank_pct')}
+Betweenness percentile: {_pct('betweenness_pct')}
 Citation in-degree percentile: {_pct('indegree_pct')}
-Co-authors: {stats.get('n_coauthors','?')}
-{('Research areas: ' + sub_str) if sub_str else ''}
+Co-authors (in {field}): {stats.get('n_coauthors','?')}
 
-Sample papers:
-{paper_str}"""
+Most-cited papers (in {field}):
+{paper_str}
+--- End of data ---
+
+Write the profile now. Do not reproduce the data table; weave the facts into prose."""
 
     payload = json.dumps({
         "model": model, "prompt": prompt, "stream": False,
-        "options": {"temperature": 0.25, "num_predict": 450},
+        "options": {"temperature": 0.3, "num_predict": 600},
     }).encode()
     try:
         req = urllib.request.Request(
@@ -713,214 +649,6 @@ Betweenness is computed for top-ranked authors only.
     print(f"HTML  → {output_path}")
 
 
-# ── LaTeX / PDF report ────────────────────────────────────────────────────────
-
-def write_latex(stats, papers, coauth_G, cit_G, out_dir, llm_text=None):
-    """Write .tex + network figure PDF. Returns path to .tex file."""
-    os.makedirs(out_dir, exist_ok=True)
-
-    author_name = stats.get("author_name", "Unknown")
-    aid     = stats.get("author_id", "")
-    inst    = stats.get("institution", "")
-    country = stats.get("country", "")
-    field   = stats.get("field", "")
-
-    # Network figure (saved as PDF for vector quality)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
-    _mpl_coauthor(coauth_G, aid, ax1, f"Co-author Network — {_short(author_name)}")
-    _mpl_citation_ego(cit_G, aid, ax2, f"Citation Ego Network — {_short(author_name)}")
-    plt.tight_layout(pad=1.5)
-    net_fig_path = os.path.join(out_dir, "networks.pdf")
-    fig.savefig(net_fig_path, format="pdf", bbox_inches="tight")
-    plt.close()
-    print(f"  Network fig → {net_fig_path}")
-
-    # Metrics table
-    metrics = [
-        ("Papers",                     stats.get("papers","--"),              stats.get("papers_pct","")),
-        ("Citations",                  stats.get("citations","--"),           stats.get("citations_pct","")),
-        ("PageRank",                   f"{stats.get('pagerank',0):.5f}",      stats.get("pagerank_pct","")),
-        ("Betweenness centrality",     f"{stats.get('betweenness',0):.5f}",   stats.get("betweenness_pct","")),
-        ("In-degree (cited by)",       stats.get("indegree","--"),            stats.get("indegree_pct","")),
-        ("Out-degree (cites others)",  stats.get("outdegree","--"),           stats.get("outdegree_pct","")),
-        ("Co-authors",                 stats.get("n_coauthors","--"),         ""),
-        ("First-author papers",        stats.get("first_author_papers","--"), ""),
-        ("Last-author papers",         stats.get("last_author_papers","--"),  ""),
-    ]
-    def _metric_row(m, v, p):
-        pct_str = (_ltx(str(p)) + r"\,\%") if str(p) not in ("", "None") else "---"
-        return rf"    {_ltx(m)} & {_ltx(str(v))} & {pct_str} \\"
-    metric_rows = "\n".join(
-        _metric_row(m, v, p)
-        for m, v, p in metrics if str(v) not in ("", "nan", "None")
-    )
-
-    def _small_table(key, col1, col2, caption):
-        rows_data = stats.get(key, [])
-        if not rows_data:
-            return ""
-        body = "\n".join(
-            rf"    {_ltx(str(r[col1]))} & {r[col2]} \\"
-            for r in rows_data)
-        return rf"""
-\subsection*{{{_ltx(caption)}}}
-\begin{{tabular}}{{lr}}
-\toprule
-{_ltx(col1.capitalize())} & {_ltx(col2.capitalize())} \\
-\midrule
-{body}
-\bottomrule
-\end{{tabular}}
-"""
-
-    sub_tex   = _small_table("subclass_breakdown",   "subclass",   "papers", "Research areas (subclass)")
-    stype_tex = _small_table("study_type_breakdown", "Study type", "papers", "Study types")
-
-    papers_tex = ""
-    if papers:
-        items = "\n".join(r"  \item " + _ltx(p) for p in papers[:15])
-        papers_tex = rf"""
-\section*{{Sample Papers}}
-\begin{{itemize}}\setlength\itemsep{{2pt}}
-{items}
-\end{{itemize}}"""
-
-    llm_tex = ""
-    if llm_text:
-        paras = "\n\n".join(_ltx(p.strip()) for p in llm_text.split("\n\n") if p.strip())
-        llm_tex = rf"""
-\section*{{Profile}}
-\begin{{quote}}
-\itshape
-{paras}
-\end{{quote}}
-{{\small\textcolor{{gray}}{{Generated by a local language model via Ollama. Verify before use.}}}}
-\bigskip"""
-
-    oa_url = aid if aid.startswith("http") else ""
-    oa_url_tex = (r"{\small\url{" + oa_url + r"}}") if oa_url else ""
-
-    tex = rf"""\documentclass[a4paper,11pt]{{article}}
-\usepackage[T1]{{fontenc}}
-\usepackage[utf8]{{inputenc}}
-\usepackage{{lmodern}}
-\usepackage{{microtype}}
-\usepackage[top=2.5cm,bottom=2.5cm,left=2.5cm,right=2.5cm]{{geometry}}
-\usepackage{{booktabs}}
-\usepackage{{graphicx}}
-\usepackage{{xcolor}}
-\usepackage{{array}}
-\usepackage[colorlinks=true,urlcolor=blue,linkcolor=blue]{{hyperref}}
-\usepackage{{fancyhdr}}
-\usepackage{{caption}}
-\usepackage{{amssymb}}
-\usepackage{{pdflscape}}
-
-\definecolor{{accent}}{{RGB}}{{52,152,219}}
-
-\pagestyle{{fancy}}\fancyhf{{}}
-\lhead{{\small\itshape {_ltx(author_name)}}}
-\rhead{{\small\itshape {_ltx(field)} --- Author Report}}
-\rfoot{{\small\thepage}}
-\renewcommand{{\headrulewidth}}{{0.4pt}}
-
-\begin{{document}}
-
-%% ── Title block ──────────────────────────────────────────────────────────────
-\begin{{center}}
-  {{\LARGE\bfseries {_ltx(author_name)}}}\\[0.4em]
-  {{\large\color{{accent}} {_ltx(field)}}}\\[0.25em]
-  {{\normalsize {_ltx(inst)}{(', ' + _ltx(country)) if country else ''}}}\\[0.15em]
-  {oa_url_tex}
-\end{{center}}
-\vspace{{0.4em}}\noindent\rule{{\linewidth}}{{0.5pt}}\vspace{{0.4em}}
-
-{llm_tex}
-
-%% ── Metrics ──────────────────────────────────────────────────────────────────
-\section*{{Network Metrics and Field Ranks}}
-
-\begin{{tabular}}{{p{{6.5cm}}rr}}
-\toprule
-Metric & Value & Percentile\textsuperscript{{$\dagger$}} \\
-\midrule
-{metric_rows}
-\bottomrule
-\end{{tabular}}
-
-\smallskip
-{{\footnotesize $\dagger$\,Proportion of authors in the {_ltx(field)} corpus scoring below
-this author. Betweenness is approximated for top-ranked authors only.}}
-
-%% ── Research breakdown ───────────────────────────────────────────────────────
-\section*{{Research Breakdown}}
-
-\noindent
-\begin{{minipage}}[t]{{0.46\linewidth}}
-{sub_tex}
-\end{{minipage}}\hfill
-\begin{{minipage}}[t]{{0.46\linewidth}}
-{stype_tex}
-\end{{minipage}}
-
-{papers_tex}
-
-%% ── Network figures ──────────────────────────────────────────────────────────
-\begin{{landscape}}
-\section*{{Networks}}
-
-\noindent\includegraphics[width=\linewidth]{{networks.pdf}}
-
-\noindent{{\small
-  \textbf{{Left:}} Co-author ego network. Edge width $\propto$ shared papers.
-  \textbf{{Right:}} Citation ego network.
-  \textcolor[RGB]{{0,204,150}}{{Green}} = authors this author cites;\;
-  \textcolor[RGB]{{171,99,250}}{{Purple}} = authors who cite this author.\;
-  $\bigstar$ = focal author.
-}}
-\end{{landscape}}
-
-\vfill
-\noindent\rule{{\linewidth}}{{0.4pt}}\\
-{{\small Data source: \href{{https://openalex.org}}{{OpenAlex}}.
-Metrics are computed within the {_ltx(field)} corpus and reflect
-within-field standing only.
-Generated \today.}}
-
-\end{{document}}
-"""
-
-    tex_path = os.path.join(out_dir, "author_report.tex")
-    with open(tex_path, "w", encoding="utf-8") as f:
-        f.write(tex)
-    print(f"LaTeX → {tex_path}")
-    return tex_path
-
-
-def compile_latex(tex_path):
-    tex_dir = os.path.dirname(os.path.abspath(tex_path))
-    tex_name = os.path.basename(tex_path)
-    for compiler in ["pdflatex", "xelatex"]:
-        try:
-            for _ in range(2):   # two passes for cross-references
-                subprocess.run(
-                    [compiler, "-interaction=nonstopmode", tex_name],
-                    cwd=tex_dir, capture_output=True, timeout=120,
-                )
-            pdf = tex_path.replace(".tex", ".pdf")
-            if os.path.exists(pdf):
-                print(f"PDF   → {pdf}")
-                return pdf
-        except FileNotFoundError:
-            continue
-        except subprocess.TimeoutExpired:
-            print("WARNING: LaTeX compilation timed out.")
-            return None
-    print("WARNING: pdflatex/xelatex not found.")
-    print(f"         Install MacTeX or BasicTeX, then run: pdflatex {tex_path}")
-    return None
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -933,11 +661,12 @@ def main():
         os.path.join(DEFAULT_DATA_BASE, _pre_args.prefix) if _pre_args.prefix else None)
     cfg = _load_cfg(_data_dir_hint)
 
-    ap = argparse.ArgumentParser(description="Bespoke author report (HTML + LaTeX/PDF)")
+    ap = argparse.ArgumentParser(description="Bespoke author report (HTML)")
     grp = ap.add_mutually_exclusive_group(required=True)
     grp.add_argument("--author",    help="Author name (substring search)")
     grp.add_argument("--author-id", dest="author_id", help="OpenAlex author ID")
-    ap.add_argument("--prefix",        default=cfg.get("prefix", ""))
+    ap.add_argument("--prefix",        default=None,
+                    help="Dataset prefix (default: derived from --data-dir basename)")
     ap.add_argument("--data-dir",      default=None)
     ap.add_argument("--title",         default=cfg.get("title", "Research Field"),
                     help="Field label for the report")
@@ -952,9 +681,11 @@ def main():
     ap.add_argument("--no-llm",        action="store_true")
     args = ap.parse_args()
 
+    cfg_prefix = cfg.get("prefix", "")
     data_dir = (args.data_dir or
-                (os.path.join(DEFAULT_DATA_BASE, args.prefix) if args.prefix
+                (os.path.join(DEFAULT_DATA_BASE, args.prefix or cfg_prefix) if (args.prefix or cfg_prefix)
                  else DEFAULT_DATA_BASE))
+    out_prefix = args.prefix or os.path.basename(data_dir.rstrip("/\\"))
 
     # Phase 1: load small index files to resolve the author ID
     print(f"Loading data from {data_dir} …")
@@ -998,14 +729,11 @@ def main():
     # Resolve output directory
     slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
     out_dir = args.output_dir or os.path.join(
-        "reports", args.prefix or "default", slug)
+        "reports", out_prefix, slug)
     os.makedirs(out_dir, exist_ok=True)
 
     write_html(stats, papers, coauth_G, cit_G,
                os.path.join(out_dir, "report.html"), llm_text=llm_text)
-    tex_path = write_latex(stats, papers, coauth_G, cit_G,
-                           out_dir, llm_text=llm_text)
-    compile_latex(tex_path)
 
     print(f"\nOutput: {out_dir}/")
 

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dietary antioxidant flavonoids and risk of coronary heart disease: the — Citation Network</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+/* ── Reset & base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont,
+  'Segoe UI', Arial, sans-serif; font-size: 13px; background: #f0f2f5; color: #222; }
+
+/* ── Layout ── */
+#app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+#header { background: #2c3e50; color: #fff; padding: .6rem 1.2rem;
+           display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+#header h1 { font-size: .95rem; font-weight: 600; flex: 1; min-width: 0;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#header .meta { font-size: .75rem; color: #bdc3c7; white-space: nowrap; }
+#header .ext-link { color: #5dade2; font-size: .75rem; text-decoration: none; }
+#header .ext-link:hover { text-decoration: underline; }
+
+#body { display: grid; grid-template-columns: 280px 1fr; overflow: hidden; }
+
+/* ── Left sidebar ── */
+#sidebar { background: #fff; border-right: 1px solid #dde1e7;
+            overflow-y: auto; display: flex; flex-direction: column; }
+.sidebar-section { padding: .7rem .9rem; border-bottom: 1px solid #eef0f3; }
+.sidebar-section h3 { font-size: .72rem; text-transform: uppercase;
+                       letter-spacing: .06em; color: #7f8c8d; margin-bottom: .5rem; }
+
+/* stat chips */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+.stat-chip { background: #f7f9fc; border: 1px solid #e3e8ef; border-radius: 6px;
+              padding: .35rem .5rem; text-align: center; }
+.stat-chip .val { font-size: 1.05rem; font-weight: 700; color: #2c3e50; }
+.stat-chip .lbl { font-size: .65rem; color: #888; margin-top: 1px; }
+
+/* controls */
+.ctrl-row { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; }
+.ctrl-row label { font-size: .75rem; color: #555; flex: 1; }
+select, button {
+  font-size: .75rem; border: 1px solid #ccd; border-radius: 4px;
+  padding: .25rem .5rem; background: #fff; cursor: pointer; }
+button { background: #34495e; color: #fff; border-color: #34495e; }
+button:hover { background: #2c3e50; }
+.filter-row { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .3rem; }
+.chip { display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .5rem;
+         border-radius: 12px; font-size: .7rem; cursor: pointer;
+         border: 2px solid transparent; user-select: none; }
+.chip.active { opacity: 1; border-color: #555; }
+.chip.inactive { opacity: .4; }
+.chip-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+/* legend */
+.legend-item { display: flex; align-items: center; gap: .4rem;
+                font-size: .72rem; margin-bottom: .3rem; }
+.legend-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+
+/* node detail panel */
+#detail { flex: 1; padding: .7rem .9rem; }
+#detail h3 { font-size: .72rem; text-transform: uppercase;
+              letter-spacing: .06em; color: #7f8c8d; margin-bottom: .5rem; }
+#detail-content { font-size: .78rem; color: #444; line-height: 1.55; }
+#detail-content .dt { font-weight: 600; color: #2c3e50; }
+#detail-content .hint { color: #aaa; font-style: italic; }
+#detail-content a { color: #2980b9; }
+
+/* ── Cytoscape canvas ── */
+#cy { width: 100%; height: 100%; background: #fafbfc; }
+
+/* ── Below fold ── */
+#below { grid-column: 1 / -1; background: #fff;
+          border-top: 2px solid #dde1e7; overflow-y: auto;
+          max-height: 320px; }
+#tabs { display: flex; gap: 0; border-bottom: 1px solid #dde; }
+.tab { padding: .5rem 1.1rem; font-size: .78rem; cursor: pointer;
+        border-bottom: 3px solid transparent; color: #555; }
+.tab.active { border-bottom-color: #2980b9; color: #2980b9; font-weight: 600; }
+.tab-panel { display: none; padding: .8rem 1rem; }
+.tab-panel.active { display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .78rem; }
+th { background: #34495e; color: #fff; padding: .35rem .7rem; text-align: left;
+      position: sticky; top: 0; }
+td { padding: .3rem .7rem; border-bottom: 1px solid #eee; vertical-align: top; }
+tr:hover td { background: #f5f7fa; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.llm-box { background: #fffdf5; border: 1px solid #f0e0a0; border-radius: 6px;
+            padding: .8rem 1rem; font-size: .82rem; line-height: 1.6; }
+.llm-box p { margin: .4em 0; }
+.llm-head { font-weight: 600; margin-bottom: .5rem; color: #5d4e00; }
+.llm-tag { font-size: .68rem; font-weight: 400; color: #e67e22; margin-left: .4em; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Header ── -->
+<div id="header">
+  <h1>★ Dietary antioxidant flavonoids and risk of coronary heart disease: the Zutphen Elderly Study</h1>
+  <span class="meta">1993.0 &middot; The Lancet</span>
+  <span class="meta">Flavonoid research</span>
+  <a href="https://doi.org/10.1016/0140-6736(93)92876-u" target="_blank" class="ext-link">DOI ↗</a> <a href="https://openalex.org/W2061142443" target="_blank" class="ext-link">OpenAlex ↗</a>
+</div>
+
+<!-- ── Body: sidebar + network ── -->
+<div id="body">
+
+  <!-- Left sidebar -->
+  <div id="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Paper metrics</h3>
+      <div class="stats-grid">
+        <div class="stat-chip"><div class="val">4352</div><div class="lbl">Total citations</div></div>
+        <div class="stat-chip"><div class="val">1545</div><div class="lbl">Citing in corpus</div></div>
+        <div class="stat-chip"><div class="val">12</div><div class="lbl">References in corpus</div></div>
+        <div class="stat-chip"><div class="val">Observational</div><div class="lbl">Study type</div></div>
+        <div class="stat-chip"><div class="val">5</div><div class="lbl">Authors</div></div>
+        <div class="stat-chip"><div class="val">Closed</div><div class="lbl">Access</div></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Network controls</h3>
+      <div class="ctrl-row">
+        <label>Layout</label>
+        <select id="layout-sel">
+          <option value="cose">Force-directed (cose)</option>
+          <option value="concentric">Concentric by role</option>
+          <option value="breadthfirst">Breadth-first</option>
+          <option value="circle">Circle</option>
+          <option value="grid">Grid</option>
+        </select>
+      </div>
+      <div class="ctrl-row">
+        <label>Labels</label>
+        <select id="label-sel">
+          <option value="on">Show</option>
+          <option value="off">Hide</option>
+        </select>
+      </div>
+      <div class="ctrl-row">
+        <button id="fit-btn">Fit to window</button>
+        <button id="reset-btn">Reset layout</button>
+      </div>
+      <div style="margin-top:.5rem;font-size:.7rem;color:#888">Filter nodes:</div>
+      <div class="filter-row" id="filter-chips">
+        <span class="chip active" data-role="focal" style="background:#fde8e5">
+          <span class="chip-dot" style="background:#EF553B"></span>Focal
+        </span>
+        <span class="chip active" data-role="cites_focal" style="background:#f0eafa">
+          <span class="chip-dot" style="background:#AB63FA"></span>Cites focal
+        </span>
+        <span class="chip active" data-role="cited_by_focal" style="background:#e6faf5">
+          <span class="chip-dot" style="background:#00CC96"></span>Cited by focal
+        </span>
+        <span class="chip active" data-role="citing_depth2" style="background:#fff0e5">
+          <span class="chip-dot" style="background:#FFA15A"></span>Depth-2
+        </span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Legend</h3>
+      <div class="legend-item"><span class="legend-dot" style="background:#EF553B"></span>Focal paper (this work)</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#AB63FA"></span>Papers citing this work</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#00CC96"></span>Papers cited by this work</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#FFA15A"></span>Depth-2 citing papers</div>
+      <div style="font-size:.68rem;color:#999;margin-top:.4rem">Node size ∝ log(citations)</div>
+    </div>
+
+    <div id="detail">
+      <h3>Selected paper</h3>
+      <div id="detail-content">
+        <span class="hint">Click a node to see details</span>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- Cytoscape canvas -->
+  <div id="cy"></div>
+
+</div><!-- /body -->
+
+<!-- ── Below-fold tabs ── -->
+<div id="below">
+  <div id="tabs">
+    <div class="tab active" data-tab="citing">Top citing papers</div>
+    <div class="tab" data-tab="llm">Impact commentary</div>
+  </div>
+  <div class="tab-panel active" id="tab-citing">
+    <table>
+      <tr><th>Year</th><th>Title</th><th>Journal</th><th>Citations</th></tr>
+      <tr><td>1996.0</td><td>Structure-antioxidant activity relationships of flavonoids and phenolic aci</td><td>Free Radical Biology and Medicine</td><td class='num'>8916</td></tr><tr><td>2000.0</td><td>The Effects of Plant Flavonoids on Mammalian Cells:Implications for Inflamm</td><td>Pharmacological Reviews</td><td class='num'>4827</td></tr><tr><td>1997.0</td><td>Antioxidant properties of phenolic compounds</td><td>Trends in Plant Science</td><td class='num'>4319</td></tr><tr><td>2002.0</td><td>Flavonoid antioxidants: chemistry, metabolism and structure-activity relati</td><td>The Journal of Nutritional Biochemi</td><td class='num'>4118</td></tr><tr><td>2009.0</td><td>Polyphenols: Chemistry, Dietary Sources, Metabolism, and Nutritional Signif</td><td>Nutrition Reviews</td><td class='num'>3981</td></tr><tr><td>2000.0</td><td>Advances in flavonoid research since 1992</td><td>Phytochemistry</td><td class='num'>3905</td></tr><tr><td>2001.0</td><td>Flavonoids: a review of probable mechanisms of action and potential applica</td><td>American Journal of Clinical Nutrit</td><td class='num'>3053</td></tr><tr><td>2005.0</td><td>Phenolic compounds in plants and agri-industrial by-products: Antioxidant a</td><td>Food Chemistry</td><td class='num'>3046</td></tr><tr><td>2002.0</td><td>The biochemistry and medical significance of the flavonoids</td><td>Pharmacology & Therapeutics</td><td class='num'>2650</td></tr><tr><td>2002.0</td><td>Bioactive compounds in foods: their role in the prevention of cardiovascula</td><td>The American Journal of Medicine</td><td class='num'>2529</td></tr><tr><td>1997.0</td><td>Antioxidant and Prooxidant Behavior of Flavonoids: Structure-Activity Relat</td><td>Free Radical Biology and Medicine</td><td class='num'>2394</td></tr><tr><td>2003.0</td><td>Health benefits of fruit and vegetables are from additive and synergistic c</td><td>American Journal of Clinical Nutrit</td><td class='num'>2169</td></tr><tr><td>1995.0</td><td>The Relative Antioxidant Activities of Plant-Derived Polyphenolic Flavonoid</td><td>Free Radical Research</td><td class='num'>2153</td></tr><tr><td>2002.0</td><td>D<scp>IETARY</scp> F<scp>LAVONOIDS</scp>: Bioavailability, Metabolic Effect</td><td>Annual Review of Nutrition</td><td class='num'>2151</td></tr><tr><td>1996.0</td><td>Vegetables, Fruit, and Cancer Prevention</td><td>Journal of the American Dietetic As</td><td class='num'>2122</td></tr><tr><td>2008.0</td><td>Health effects of quercetin: From antioxidant to nutraceutical</td><td>European Journal of Pharmacology</td><td class='num'>2050</td></tr><tr><td>2009.0</td><td>Dietary phenolics: chemistry, bioavailability and effects on health</td><td>Natural Product Reports</td><td class='num'>1941</td></tr><tr><td>2005.0</td><td>Polyphenols and disease risk in epidemiologic studies</td><td>American Journal of Clinical Nutrit</td><td class='num'>1913</td></tr><tr><td>2003.0</td><td>Antioxidant Activity of Apple Peels</td><td>Journal of Agricultural and Food Ch</td><td class='num'>1838</td></tr><tr><td>1995.0</td><td>Flavonoid Intake and Long-term Risk of Coronary Heart Disease and Cancer in</td><td>Archives of Internal Medicine</td><td class='num'>1765</td></tr>
+    </table>
+  </div>
+  <div class="tab-panel" id="tab-llm"><div class="llm-box">
+<div class="llm-head">Impact commentary
+  <span class="llm-tag">AI-generated · verify before use</span>
+</div>
+<p>The paper "Dietary antioxidant flavonoids and risk of coronary heart disease: the Zutphen Elderly Study" published in The Lancet in 1993 represents a landmark observational study within the field of Flavonoid research. This work investigated the relationship between dietary intake of flavonoids and the risk of coronary heart disease among elderly men, providing valuable insights into the potential health benefits of flavonoid consumption.</p><p>The impact of this paper is evident in its extensive citation record within the Flavonoid research corpus, with 1545 papers citing it. Notably, several prominent studies have built upon or referenced this work, including Structure-antioxidant activity relationships of flavonoids and phenoli (1996), The Effects of Plant Flavonoids on Mammalian Cells: Implications for In (2000), and Polyphenols: Chemistry, Dietary Sources, Metabolism, and Nutritional S (2009). These papers collectively demonstrate the significant influence of this study in shaping the understanding of flavonoid bioactivity and its potential applications in human health.</p>
+</div></div>
+</div>
+
+</div><!-- /app -->
+
+<script>
+const ELEMENTS = [{"data": {"id": "https://openalex.org/W2061142443", "label": "Dietary antioxidant flavonoids\u2026", "title": "Dietary antioxidant flavonoids and risk of coronary heart disease: the Zutphen Elderly Study", "year": 1993, "citations": 4352, "journal": "The Lancet", "role": "focal", "color": "#EF553B", "size": 90, "focal": true}}, {"data": {"id": "https://openalex.org/W2086959952", "label": "Structure-antioxidant activity\u2026", "title": "Structure-antioxidant activity relationships of flavonoids and phenolic acids", "year": 1996, "citations": 8916, "journal": "Free Radical Biology and Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2136912731", "label": "The Effects of Plant Flavonoid\u2026", "title": "The Effects of Plant Flavonoids on Mammalian Cells:Implications for Inflammation, Heart Disease, and Cancer", "year": 2000, "citations": 4827, "journal": "Pharmacological Reviews", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1972060131", "label": "Antioxidant properties of phen\u2026", "title": "Antioxidant properties of phenolic compounds", "year": 1997, "citations": 4319, "journal": "Trends in Plant Science", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2116060738", "label": "Flavonoid antioxidants: chemis\u2026", "title": "Flavonoid antioxidants: chemistry, metabolism and structure-activity relationships", "year": 2002, "citations": 4118, "journal": "The Journal of Nutritional Biochemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1979189704", "label": "Polyphenols: Chemistry, Dietar\u2026", "title": "Polyphenols: Chemistry, Dietary Sources, Metabolism, and Nutritional Significance", "year": 2009, "citations": 3981, "journal": "Nutrition Reviews", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2125299541", "label": "Advances in flavonoid research\u2026", "title": "Advances in flavonoid research since 1992", "year": 2000, "citations": 3905, "journal": "Phytochemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2144868623", "label": "Flavonoids: a review of probab\u2026", "title": "Flavonoids: a review of probable mechanisms of action and potential applications", "year": 2001, "citations": 3053, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2006697833", "label": "Phenolic compounds in plants a\u2026", "title": "Phenolic compounds in plants and agri-industrial by-products: Antioxidant activity, occurrence, and potential uses", "year": 2005, "citations": 3046, "journal": "Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2048695976", "label": "The biochemistry and medical s\u2026", "title": "The biochemistry and medical significance of the flavonoids", "year": 2002, "citations": 2650, "journal": "Pharmacology & Therapeutics", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2018967387", "label": "Bioactive compounds in foods: \u2026", "title": "Bioactive compounds in foods: their role in the prevention of cardiovascular disease and cancer", "year": 2002, "citations": 2529, "journal": "The American Journal of Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2057889917", "label": "Antioxidant and Prooxidant Beh\u2026", "title": "Antioxidant and Prooxidant Behavior of Flavonoids: Structure-Activity Relationships", "year": 1997, "citations": 2394, "journal": "Free Radical Biology and Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2153394357", "label": "Health benefits of fruit and v\u2026", "title": "Health benefits of fruit and vegetables are from additive and synergistic combinations of phytochemicals", "year": 2003, "citations": 2169, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2146346788", "label": "The Relative Antioxidant Activ\u2026", "title": "The Relative Antioxidant Activities of Plant-Derived Polyphenolic Flavonoids", "year": 1995, "citations": 2153, "journal": "Free Radical Research", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2120487488", "label": "D<scp>IETARY</scp> F<scp>LAVON\u2026", "title": "D<scp>IETARY</scp> F<scp>LAVONOIDS</scp>: Bioavailability, Metabolic Effects, and Safety", "year": 2002, "citations": 2151, "journal": "Annual Review of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2066504626", "label": "Vegetables, Fruit, and Cancer \u2026", "title": "Vegetables, Fruit, and Cancer Prevention", "year": 1996, "citations": 2122, "journal": "Journal of the American Dietetic Association", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1966700699", "label": "Health effects of quercetin: F\u2026", "title": "Health effects of quercetin: From antioxidant to nutraceutical", "year": 2008, "citations": 2050, "journal": "European Journal of Pharmacology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2163388941", "label": "Dietary phenolics: chemistry, \u2026", "title": "Dietary phenolics: chemistry, bioavailability and effects on health", "year": 2009, "citations": 1941, "journal": "Natural Product Reports", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2129133439", "label": "Polyphenols and disease risk i\u2026", "title": "Polyphenols and disease risk in epidemiologic studies", "year": 2005, "citations": 1913, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2121793916", "label": "Antioxidant Activity of Apple \u2026", "title": "Antioxidant Activity of Apple Peels", "year": 2003, "citations": 1838, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2074581135", "label": "Flavonoid Intake and Long-term\u2026", "title": "Flavonoid Intake and Long-term Risk of Coronary Heart Disease and Cancer in the Seven Countries Study", "year": 1995, "citations": 1765, "journal": "Archives of Internal Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2010807769", "label": "Review of the biology of querc\u2026", "title": "Review of the biology of quercetin and related bioflavonoids", "year": 1995, "citations": 1758, "journal": "Food and Chemical Toxicology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2117779115", "label": "Flavonoids\u2014Chemistry, metaboli\u2026", "title": "Flavonoids\u2014Chemistry, metabolism, cardioprotective effects, and dietary sources", "year": 1996, "citations": 1701, "journal": "The Journal of Nutritional Biochemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2180470224", "label": "Antioxidants in Human Health a\u2026", "title": "Antioxidants in Human Health and Disease", "year": 1996, "citations": 1697, "journal": "Annual Review of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2139135476", "label": "Apple phytochemicals and their\u2026", "title": "Apple phytochemicals and their health benefits", "year": 2004, "citations": 1563, "journal": "Nutrition Journal", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2144862608", "label": "Flavonoids in Food and Their H\u2026", "title": "Flavonoids in Food and Their Health Benefits", "year": 2004, "citations": 1560, "journal": "Plant Foods for Human Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2015801271", "label": "Antioxidant and prooxidant pro\u2026", "title": "Antioxidant and prooxidant properties of flavonoids", "year": 2011, "citations": 1528, "journal": "Fitoterapia", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2139243915", "label": "A Review on the Dietary Flavon\u2026", "title": "A Review on the Dietary Flavonoid Kaempferol", "year": 2011, "citations": 1342, "journal": "Mini-Reviews in Medicinal Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2012716588", "label": "Flavonoids: Old and new aspect\u2026", "title": "Flavonoids: Old and new aspects of a class of natural therapeutic drugs", "year": 1999, "citations": 1300, "journal": "Life Sciences", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2172047505", "label": "Health-Promoting Components of\u2026", "title": "Health-Promoting Components of Fruits and Vegetables in the Diet", "year": 2013, "citations": 1287, "journal": "Advances in Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1981184057", "label": "Flavonoid intake and coronary \u2026", "title": "Flavonoid intake and coronary mortality in Finland: a cohort study", "year": 1996, "citations": 1268, "journal": "BMJ", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2109119392", "label": "Antioxidants in fruits and veg\u2026", "title": "Antioxidants in fruits and vegetables \u2013 the millennium\u2019s health", "year": 2001, "citations": 1215, "journal": "International Journal of Food Science & Technology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1990878156", "label": "The molecular basis of working\u2026", "title": "The molecular basis of working mechanism of natural polyphenolic antioxidants", "year": 2010, "citations": 1206, "journal": "Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1987407807", "label": "Citrus flavonoids: Molecular s\u2026", "title": "Citrus flavonoids: Molecular structure, biological activity and nutritional properties: A review", "year": 2007, "citations": 1164, "journal": "Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2121868928", "label": "Dietary Flavonoids: Intake, He\u2026", "title": "Dietary Flavonoids: Intake, Health Effects and Bioavailability", "year": 1999, "citations": 1136, "journal": "Food and Chemical Toxicology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1968359564", "label": "Antimicrobial effects of Finni\u2026", "title": "Antimicrobial effects of Finnish plant extracts containing flavonoids and other phenolic compounds", "year": 2000, "citations": 1128, "journal": "International Journal of Food Microbiology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2038053883", "label": "Distribution and Biological Ac\u2026", "title": "Distribution and Biological Activities of the Flavonoid Luteolin", "year": 2008, "citations": 1098, "journal": "Mini-Reviews in Medicinal Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1845493419", "label": "Health-promoting properties of\u2026", "title": "Health-promoting properties of common herbs", "year": 1999, "citations": 1092, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2120059732", "label": "Flavonoids, flavonoid-rich foo\u2026", "title": "Flavonoids, flavonoid-rich foods, and cardiovascular risk: a meta-analysis of randomized controlled trials", "year": 2008, "citations": 1083, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2041504287", "label": "Mass spectrometry in the struc\u2026", "title": "Mass spectrometry in the structural analysis of flavonoids", "year": 2004, "citations": 1056, "journal": "Journal of Mass Spectrometry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2031690762", "label": "Anti-inflammatory Plant Flavon\u2026", "title": "Anti-inflammatory Plant Flavonoids and Cellular Action Mechanisms", "year": 2004, "citations": 992, "journal": "Journal of Pharmacological Sciences", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2118447955", "label": "Flavonoid intake and cardiovas\u2026", "title": "Flavonoid intake and cardiovascular disease mortality: a prospective study in postmenopausal women", "year": 2007, "citations": 943, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2145562618", "label": "Concentrations of Proanthocyan\u2026", "title": "Concentrations of Proanthocyanidins in Common Foods and Estimations of Normal Consumption", "year": 2004, "citations": 930, "journal": "Journal of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2002760082", "label": "Phlorizin: a review", "title": "Phlorizin: a review", "year": 2004, "citations": 921, "journal": "Diabetes/Metabolism Research and Reviews", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2168313361", "label": "Review of the flavonoids querc\u2026", "title": "Review of the flavonoids quercetin, hesperetin, and naringenin. Dietary sources, bioactivities, bioavailability, and epidemiology", "year": 2004, "citations": 913, "journal": "Nutrition Research", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1963876824", "label": "Antioxidant activity of phenol\u2026", "title": "Antioxidant activity of phenolics extracted from Olea europaea L. leaves", "year": 2000, "citations": 860, "journal": "Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2037572821", "label": "Identification and Quantificat\u2026", "title": "Identification and Quantification of Antioxidant Components of Honeys from Various Floral Sources", "year": 2002, "citations": 853, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2133971230", "label": "Flavonoids protect neuronal ce\u2026", "title": "Flavonoids protect neuronal cells from oxidative stress by three distinct mechanisms", "year": 2001, "citations": 837, "journal": "Free Radical Biology and Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2142439172", "label": "Dietary flavonols: chemistry, \u2026", "title": "Dietary flavonols: chemistry, food content, and metabolism", "year": 2002, "citations": 829, "journal": "Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1971570374", "label": "Oxygen Radical Absorbing Capac\u2026", "title": "Oxygen Radical Absorbing Capacity of Phenolics in Blueberries, Cranberries, Chokeberries, and Lingonberries", "year": 2002, "citations": 809, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2106357931", "label": "Flavonoids as Nutraceuticals: \u2026", "title": "Flavonoids as Nutraceuticals: A Review", "year": 2008, "citations": 804, "journal": "Tropical Journal of Pharmaceutical Research", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2150569822", "label": "Dietary Intakes of Flavonols, \u2026", "title": "Dietary Intakes of Flavonols, Flavones and Isoflavones by Japanese Women and the Inverse Correlation between Quercetin Intake and Plasma LDL Cholesterol Concentration", "year": 2000, "citations": 784, "journal": "Journal of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2044940018", "label": "Content of the Flavonols Querc\u2026", "title": "Content of the Flavonols Quercetin, Myricetin, and Kaempferol in 25 Edible Berries", "year": 1999, "citations": 778, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1979136832", "label": "The Role of Tea in Human Healt\u2026", "title": "The Role of Tea in Human Health: An Update", "year": 2002, "citations": 770, "journal": "Journal of the American College of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1993083361", "label": "Consumption of flavonoid-rich \u2026", "title": "Consumption of flavonoid-rich foods and increased plasma antioxidant capacity in humans: Cause, consequence, or epiphenomenon?", "year": 2006, "citations": 766, "journal": "Free Radical Biology and Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2017899449", "label": "Characterization of Anthocyani\u2026", "title": "Characterization of Anthocyanins and Proanthocyanidins in Some Cultivars of<i>Ribes</i>,<i>Aronia</i>, and<i>Sambucus</i>and Their Antioxidant Capacity", "year": 2004, "citations": 760, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2129971112", "label": "Plant polyphenols in cancer an\u2026", "title": "Plant polyphenols in cancer and heart disease: implications as nutritional antioxidants", "year": 2000, "citations": 755, "journal": "Nutrition Research Reviews", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2080164215", "label": "Basic biochemical mechanisms b\u2026", "title": "Basic biochemical mechanisms behind the health benefits of polyphenols", "year": 2010, "citations": 718, "journal": "Molecular Aspects of Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2140230248", "label": "Health promotion by flavonoids\u2026", "title": "Health promotion by flavonoids, tocopherols, tocotrienols, and other phenols: direct or indirect effects? Antioxidant or not?", "year": 2005, "citations": 707, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1978184244", "label": "Quantitative Analysis of the F\u2026", "title": "Quantitative Analysis of the Flavonoid Content of Commercial Tomatoes, Onions, Lettuce, and Celery", "year": 1997, "citations": 702, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2056667035", "label": "The flavonoid quercetin in dis\u2026", "title": "The flavonoid quercetin in disease prevention and therapy: Facts and fancies", "year": 2011, "citations": 686, "journal": "Biochemical Pharmacology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1981354055", "label": "Flavonoids are scavengers of s\u2026", "title": "Flavonoids are scavengers of superoxide anions", "year": 1988, "citations": 1573, "journal": "Biochemical Pharmacology", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1536161802", "label": "The Flavonoids. A Class of Sem\u2026", "title": "The Flavonoids. A Class of Semi-Essential Food Components: Their Role in Human Nutrition", "year": 2015, "citations": 1483, "journal": "World review of nutrition and dietetics", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2151001012", "label": "Content of potentially anticar\u2026", "title": "Content of potentially anticarcinogenic flavonoids of 28 vegetables and 9 fruits commonly consumed in the Netherlands", "year": 1992, "citations": 1377, "journal": "Journal of Agricultural and Food Chemistry", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2153473625", "label": "Intake of potentially anticarc\u2026", "title": "Intake of potentially anticarcinogenic flavonoids and their determinants in adults in the Netherlands", "year": 1993, "citations": 1220, "journal": "Nutrition and Cancer", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2001641852", "label": "Content of potentially anticar\u2026", "title": "Content of potentially anticarcinogenic flavonoids of tea infusions, wines, and fruit juices", "year": 1993, "citations": 896, "journal": "Journal of Agricultural and Food Chemistry", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2080308094", "label": "Hydroxyl radical scavenging ac\u2026", "title": "Hydroxyl radical scavenging activity of flavonoids", "year": 1987, "citations": 815, "journal": "Phytochemistry", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2120813581", "label": "Optimization of a quantitative\u2026", "title": "Optimization of a quantitative HPLC determination of potentially anticarcinogenic flavonoids in vegetables and fruits", "year": 1992, "citations": 710, "journal": "Journal of Agricultural and Food Chemistry", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2020967224", "label": "Flavonoids inhibit the oxidati\u2026", "title": "Flavonoids inhibit the oxidative modification of low density lipoproteins by macrophages", "year": 1990, "citations": 613, "journal": "Biochemical Pharmacology", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1574544450", "label": "Inhibition of mammalian 5-lipo\u2026", "title": "Inhibition of mammalian 5-lipoxygenase and cyclo-oxygenase by flavonoids and phenolic dietary additives", "year": 1991, "citations": 598, "journal": "Biochemical Pharmacology", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2032336626", "label": "Disposition of quercetin in ma\u2026", "title": "Disposition of quercetin in man after single oral and intravenous doses", "year": 1975, "citations": 398, "journal": "European Journal of Clinical Pharmacology", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2088110055", "label": "Quercetin prevents the cytotox\u2026", "title": "Quercetin prevents the cytotoxicity of oxidized LDL on lymphoid cell lines", "year": 1992, "citations": 180, "journal": "Free Radical Biology and Medicine", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2030227417", "label": "Protective effect of quercetin\u2026", "title": "Protective effect of quercetin and rutin on photosensitized lysis of human erythrocytes in the presence of hematoporphyrin", "year": 1984, "citations": 150, "journal": "Biochimica et Biophysica Acta (BBA) - General Subjects", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W1981354055", "id": "https://openalex.org/W2061142443__https://openalex.org/W1981354055"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W1536161802", "id": "https://openalex.org/W2061142443__https://openalex.org/W1536161802"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2151001012", "id": "https://openalex.org/W2061142443__https://openalex.org/W2151001012"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2153473625", "id": "https://openalex.org/W2061142443__https://openalex.org/W2153473625"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2001641852", "id": "https://openalex.org/W2061142443__https://openalex.org/W2001641852"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2080308094", "id": "https://openalex.org/W2061142443__https://openalex.org/W2080308094"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2120813581", "id": "https://openalex.org/W2061142443__https://openalex.org/W2120813581"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2020967224", "id": "https://openalex.org/W2061142443__https://openalex.org/W2020967224"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W1574544450", "id": "https://openalex.org/W2061142443__https://openalex.org/W1574544450"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2032336626", "id": "https://openalex.org/W2061142443__https://openalex.org/W2032336626"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2088110055", "id": "https://openalex.org/W2061142443__https://openalex.org/W2088110055"}}, {"data": {"source": "https://openalex.org/W2061142443", "target": "https://openalex.org/W2030227417", "id": "https://openalex.org/W2061142443__https://openalex.org/W2030227417"}}, {"data": {"source": "https://openalex.org/W2086959952", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2086959952__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2136912731", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2136912731__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1972060131", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1972060131__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2116060738", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2116060738__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1979189704", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1979189704__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2125299541", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2125299541__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2144868623", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2144868623__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2006697833", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2006697833__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2048695976", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2048695976__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2018967387", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2018967387__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2057889917", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2057889917__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2153394357", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2153394357__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2146346788", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2146346788__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2120487488", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2120487488__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2066504626", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2066504626__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1966700699", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1966700699__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2163388941", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2163388941__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2129133439", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2129133439__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2121793916", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2121793916__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2074581135", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2074581135__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2010807769", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2010807769__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2117779115", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2117779115__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2180470224", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2180470224__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2139135476", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2139135476__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2144862608", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2144862608__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2015801271", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2015801271__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2139243915", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2139243915__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2012716588", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2012716588__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2172047505", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2172047505__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1981184057", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1981184057__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2109119392", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2109119392__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1990878156", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1990878156__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1987407807", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1987407807__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2121868928", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2121868928__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1968359564", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1968359564__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2038053883", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2038053883__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1845493419", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1845493419__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2120059732", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2120059732__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2041504287", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2041504287__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2031690762", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2031690762__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2118447955", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2118447955__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2145562618", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2145562618__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2002760082", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2002760082__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2168313361", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2168313361__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1963876824", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1963876824__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2037572821", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2037572821__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2133971230", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2133971230__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2142439172", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2142439172__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1971570374", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1971570374__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2106357931", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2106357931__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2150569822", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2150569822__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2044940018", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2044940018__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1979136832", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1979136832__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1993083361", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1993083361__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2017899449", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2017899449__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2129971112", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2129971112__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2080164215", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2080164215__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2140230248", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2140230248__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W1978184244", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W1978184244__https://openalex.org/W2061142443"}}, {"data": {"source": "https://openalex.org/W2056667035", "target": "https://openalex.org/W2061142443", "id": "https://openalex.org/W2056667035__https://openalex.org/W2061142443"}}];
+const FOCAL_ID = "https://openalex.org/W2061142443";
+
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: ELEMENTS,
+  style: [
+    {
+      selector: 'node',
+      style: {
+        'background-color':  'data(color)',
+        'width':             'data(size)',
+        'height':            'data(size)',
+        'label':             'data(label)',
+        'font-size':         '9px',
+        'text-valign':       'bottom',
+        'text-halign':       'center',
+        'text-margin-y':     '3px',
+        'text-wrap':         'wrap',
+        'text-max-width':    '100px',
+        'color':             '#333',
+        'text-outline-color':'#fff',
+        'text-outline-width':'1.5px',
+        'border-width':      0,
+        'z-index':           1,
+      }
+    },
+    {
+      selector: 'node[?focal]',
+      style: {
+        'shape':         'star',
+        'border-width':  3,
+        'border-color':  '#b02010',
+        'font-size':     '10px',
+        'font-weight':   'bold',
+        'z-index':       10,
+      }
+    },
+    {
+      selector: 'node:selected',
+      style: {
+        'border-width': 3,
+        'border-color': '#2980b9',
+        'z-index': 20,
+      }
+    },
+    {
+      selector: 'edge',
+      style: {
+        'width':              1,
+        'line-color':         '#c8d0da',
+        'target-arrow-color': '#a0a8b8',
+        'target-arrow-shape': 'triangle',
+        'arrow-scale':        0.7,
+        'curve-style':        'bezier',
+        'opacity':            0.6,
+      }
+    },
+    {
+      selector: 'edge:selected',
+      style: { 'opacity': 1, 'width': 2, 'line-color': '#2980b9' }
+    },
+    {
+      selector: '.hidden',
+      style: { 'display': 'none' }
+    },
+  ],
+  layout: { name: 'cose', animate: true, animationDuration: 600,
+             nodeRepulsion: 8000, idealEdgeLength: 80, gravity: 0.25 },
+  wheelSensitivity: 0.3,
+});
+
+// ── Node detail panel ──
+cy.on('tap', 'node', function(e) {
+  const d = e.target.data();
+  const doi = d.id && d.id.startsWith('http') ? d.id : '';
+  document.getElementById('detail-content').innerHTML =
+    `<div class="dt">${d.title || d.label}</div>` +
+    `<div style="margin-top:.4em">Year: ${d.year || '—'} &nbsp;|&nbsp; `+
+    `Citations: ${d.citations}</div>` +
+    `<div style="color:#666;margin-top:.2em">${d.journal || ''}</div>` +
+    (doi ? `<div style="margin-top:.4em"><a href="${d.id}" target="_blank">OpenAlex ↗</a></div>` : '');
+});
+cy.on('tap', function(e) {
+  if (e.target === cy)
+    document.getElementById('detail-content').innerHTML =
+      '<span class="hint">Click a node to see details</span>';
+});
+
+// ── Layout control ──
+function runLayout(name) {
+  const opts = {
+    name,
+    animate: true, animationDuration: 500, fit: true, padding: 30,
+    ...(name === 'cose' ? { nodeRepulsion: 8000, idealEdgeLength: 80, gravity: 0.25 } : {}),
+    ...(name === 'concentric' ? {
+      concentric: n => {
+        const r = n.data('role');
+        return r === 'focal' ? 4 : r === 'cited_by_focal' ? 3 :
+               r === 'cites_focal' ? 2 : 1;
+      },
+      levelWidth: () => 1,
+    } : {}),
+  };
+  cy.layout(opts).run();
+}
+document.getElementById('layout-sel').addEventListener('change', e => runLayout(e.target.value));
+document.getElementById('fit-btn').addEventListener('click', () => cy.fit(30));
+document.getElementById('reset-btn').addEventListener('click', () => {
+  runLayout(document.getElementById('layout-sel').value);
+});
+
+// ── Label toggle ──
+document.getElementById('label-sel').addEventListener('change', e => {
+  cy.nodes().style('label', e.target.value === 'on' ? 'data(label)' : '');
+});
+
+// ── Filter chips ──
+const activeRoles = new Set(['focal','cites_focal','cited_by_focal','citing_depth2']);
+document.getElementById('filter-chips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  const role = chip.dataset.role;
+  if (role === 'focal') return;  // never hide focal
+  if (activeRoles.has(role)) {
+    activeRoles.delete(role);
+    chip.classList.replace('active','inactive');
+    cy.nodes(`[role = "${role}"]`).addClass('hidden');
+  } else {
+    activeRoles.add(role);
+    chip.classList.replace('inactive','active');
+    cy.nodes(`[role = "${role}"]`).removeClass('hidden');
+  }
+});
+
+// ── Tab switching ──
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  const panel = document.getElementById('tab-' + tab.dataset.tab);
+  if (panel) panel.classList.add('active');
+});
+
+cy.fit(30);
+</script>
+</body>
+</html>

@@ -287,7 +287,7 @@ def compute_communities(G_lcc, centrality_df):
             size=("name", "count"),
             total_papers=("papers", "sum"),
             total_citations=("citations", "sum"),
-            top_country=("country", lambda x: x.value_counts().index[0] if len(x) else ""),
+            top_country=("country", lambda x: x.value_counts().index[0] if len(x.value_counts()) else ""),
             top_author=("name", lambda x: (
                 centrality_df.loc[x.index]
                 .sort_values("betweenness", ascending=False)["name"].iloc[0]

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Effect of cocoa flavanol supplementation for the prevention of cardiov — Citation Network</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+/* ── Reset & base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont,
+  'Segoe UI', Arial, sans-serif; font-size: 13px; background: #f0f2f5; color: #222; }
+
+/* ── Layout ── */
+#app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+#header { background: #2c3e50; color: #fff; padding: .6rem 1.2rem;
+           display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+#header h1 { font-size: .95rem; font-weight: 600; flex: 1; min-width: 0;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#header .meta { font-size: .75rem; color: #bdc3c7; white-space: nowrap; }
+#header .ext-link { color: #5dade2; font-size: .75rem; text-decoration: none; }
+#header .ext-link:hover { text-decoration: underline; }
+
+#body { display: grid; grid-template-columns: 280px 1fr; overflow: hidden; }
+
+/* ── Left sidebar ── */
+#sidebar { background: #fff; border-right: 1px solid #dde1e7;
+            overflow-y: auto; display: flex; flex-direction: column; }
+.sidebar-section { padding: .7rem .9rem; border-bottom: 1px solid #eef0f3; }
+.sidebar-section h3 { font-size: .72rem; text-transform: uppercase;
+                       letter-spacing: .06em; color: #7f8c8d; margin-bottom: .5rem; }
+
+/* stat chips */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+.stat-chip { background: #f7f9fc; border: 1px solid #e3e8ef; border-radius: 6px;
+              padding: .35rem .5rem; text-align: center; }
+.stat-chip .val { font-size: 1.05rem; font-weight: 700; color: #2c3e50; }
+.stat-chip .lbl { font-size: .65rem; color: #888; margin-top: 1px; }
+
+/* controls */
+.ctrl-row { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; }
+.ctrl-row label { font-size: .75rem; color: #555; flex: 1; }
+select, button {
+  font-size: .75rem; border: 1px solid #ccd; border-radius: 4px;
+  padding: .25rem .5rem; background: #fff; cursor: pointer; }
+button { background: #34495e; color: #fff; border-color: #34495e; }
+button:hover { background: #2c3e50; }
+.filter-row { display: flex; gap: .3rem; flex-wrap: wrap; margin-top: .3rem; }
+.chip { display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .5rem;
+         border-radius: 12px; font-size: .7rem; cursor: pointer;
+         border: 2px solid transparent; user-select: none; }
+.chip.active { opacity: 1; border-color: #555; }
+.chip.inactive { opacity: .4; }
+.chip-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+/* legend */
+.legend-item { display: flex; align-items: center; gap: .4rem;
+                font-size: .72rem; margin-bottom: .3rem; }
+.legend-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+
+/* node detail panel */
+#detail { flex: 1; padding: .7rem .9rem; }
+#detail h3 { font-size: .72rem; text-transform: uppercase;
+              letter-spacing: .06em; color: #7f8c8d; margin-bottom: .5rem; }
+#detail-content { font-size: .78rem; color: #444; line-height: 1.55; }
+#detail-content .dt { font-weight: 600; color: #2c3e50; }
+#detail-content .hint { color: #aaa; font-style: italic; }
+#detail-content a { color: #2980b9; }
+
+/* ── Cytoscape canvas ── */
+#cy { width: 100%; height: 100%; background: #fafbfc; }
+
+/* ── Below fold ── */
+#below { grid-column: 1 / -1; background: #fff;
+          border-top: 2px solid #dde1e7; overflow-y: auto;
+          max-height: 320px; }
+#tabs { display: flex; gap: 0; border-bottom: 1px solid #dde; }
+.tab { padding: .5rem 1.1rem; font-size: .78rem; cursor: pointer;
+        border-bottom: 3px solid transparent; color: #555; }
+.tab.active { border-bottom-color: #2980b9; color: #2980b9; font-weight: 600; }
+.tab-panel { display: none; padding: .8rem 1rem; }
+.tab-panel.active { display: block; }
+table { border-collapse: collapse; width: 100%; font-size: .78rem; }
+th { background: #34495e; color: #fff; padding: .35rem .7rem; text-align: left;
+      position: sticky; top: 0; }
+td { padding: .3rem .7rem; border-bottom: 1px solid #eee; vertical-align: top; }
+tr:hover td { background: #f5f7fa; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.llm-box { background: #fffdf5; border: 1px solid #f0e0a0; border-radius: 6px;
+            padding: .8rem 1rem; font-size: .82rem; line-height: 1.6; }
+.llm-box p { margin: .4em 0; }
+.llm-head { font-weight: 600; margin-bottom: .5rem; color: #5d4e00; }
+.llm-tag { font-size: .68rem; font-weight: 400; color: #e67e22; margin-left: .4em; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── Header ── -->
+<div id="header">
+  <h1>★ Effect of cocoa flavanol supplementation for the prevention of cardiovascular disease events: the COcoa Supplement and Multivitamin Outcomes Study (COSMOS) randomized clinical trial</h1>
+  <span class="meta">2022.0 &middot; American Journal of Clinical Nutrition</span>
+  <span class="meta">Flavonoid research</span>
+  <a href="https://doi.org/10.1093/ajcn/nqac055" target="_blank" class="ext-link">DOI ↗</a> <a href="https://openalex.org/W4221025812" target="_blank" class="ext-link">OpenAlex ↗</a>
+</div>
+
+<!-- ── Body: sidebar + network ── -->
+<div id="body">
+
+  <!-- Left sidebar -->
+  <div id="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Paper metrics</h3>
+      <div class="stats-grid">
+        <div class="stat-chip"><div class="val">172</div><div class="lbl">Total citations</div></div>
+        <div class="stat-chip"><div class="val">51</div><div class="lbl">Citing in corpus</div></div>
+        <div class="stat-chip"><div class="val">33</div><div class="lbl">References in corpus</div></div>
+        <div class="stat-chip"><div class="val">RCT</div><div class="lbl">Study type</div></div>
+        <div class="stat-chip"><div class="val">13</div><div class="lbl">Authors</div></div>
+        <div class="stat-chip"><div class="val">Closed</div><div class="lbl">Access</div></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Network controls</h3>
+      <div class="ctrl-row">
+        <label>Layout</label>
+        <select id="layout-sel">
+          <option value="cose">Force-directed (cose)</option>
+          <option value="concentric">Concentric by role</option>
+          <option value="breadthfirst">Breadth-first</option>
+          <option value="circle">Circle</option>
+          <option value="grid">Grid</option>
+        </select>
+      </div>
+      <div class="ctrl-row">
+        <label>Labels</label>
+        <select id="label-sel">
+          <option value="on">Show</option>
+          <option value="off">Hide</option>
+        </select>
+      </div>
+      <div class="ctrl-row">
+        <button id="fit-btn">Fit to window</button>
+        <button id="reset-btn">Reset layout</button>
+      </div>
+      <div style="margin-top:.5rem;font-size:.7rem;color:#888">Filter nodes:</div>
+      <div class="filter-row" id="filter-chips">
+        <span class="chip active" data-role="focal" style="background:#fde8e5">
+          <span class="chip-dot" style="background:#EF553B"></span>Focal
+        </span>
+        <span class="chip active" data-role="cites_focal" style="background:#f0eafa">
+          <span class="chip-dot" style="background:#AB63FA"></span>Cites focal
+        </span>
+        <span class="chip active" data-role="cited_by_focal" style="background:#e6faf5">
+          <span class="chip-dot" style="background:#00CC96"></span>Cited by focal
+        </span>
+        <span class="chip active" data-role="citing_depth2" style="background:#fff0e5">
+          <span class="chip-dot" style="background:#FFA15A"></span>Depth-2
+        </span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Legend</h3>
+      <div class="legend-item"><span class="legend-dot" style="background:#EF553B"></span>Focal paper (this work)</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#AB63FA"></span>Papers citing this work</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#00CC96"></span>Papers cited by this work</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#FFA15A"></span>Depth-2 citing papers</div>
+      <div style="font-size:.68rem;color:#999;margin-top:.4rem">Node size ∝ log(citations)</div>
+    </div>
+
+    <div id="detail">
+      <h3>Selected paper</h3>
+      <div id="detail-content">
+        <span class="hint">Click a node to see details</span>
+      </div>
+    </div>
+
+  </div><!-- /sidebar -->
+
+  <!-- Cytoscape canvas -->
+  <div id="cy"></div>
+
+</div><!-- /body -->
+
+<!-- ── Below-fold tabs ── -->
+<div id="below">
+  <div id="tabs">
+    <div class="tab active" data-tab="citing">Top citing papers</div>
+    
+  </div>
+  <div class="tab-panel active" id="tab-citing">
+    <table>
+      <tr><th>Year</th><th>Title</th><th>Journal</th><th>Citations</th></tr>
+      <tr><td>2022.0</td><td>Micronutrient Supplementation to Reduce Cardiovascular Risk</td><td>Journal of the American College of </td><td class='num'>185</td></tr><tr><td>2022.0</td><td>Flavan-3-ols and Cardiometabolic Health: First Ever Dietary Bioactive Guide</td><td>Advances in Nutrition</td><td class='num'>101</td></tr><tr><td>2022.0</td><td>From Cocoa to Chocolate: Effect of Processing on Flavanols and Methylxanthi</td><td>International Journal of Molecular </td><td class='num'>81</td></tr><tr><td>2022.0</td><td>Effects of cocoa extract and a multivitamin on cognitive function: A random</td><td>Alzheimer s & Dementia</td><td class='num'>79</td></tr><tr><td>2022.0</td><td>Revisiting the bioavailability of flavan-3-ols in humans: A systematic revi</td><td>Molecular Aspects of Medicine</td><td class='num'>63</td></tr><tr><td>2023.0</td><td>Dietary flavanols restore hippocampal-dependent memory in older adults with</td><td>Proceedings of the National Academy</td><td class='num'>50</td></tr><tr><td>2024.0</td><td>Effect of multivitamin-mineral supplementation versus placebo on cognitive </td><td>American Journal of Clinical Nutrit</td><td class='num'>35</td></tr><tr><td>2024.0</td><td>Potential of dietary polyphenols for protection from age-related decline an</td><td>Nutritional Neuroscience</td><td class='num'>32</td></tr><tr><td>2022.0</td><td>Proanthocyanidins at the gastrointestinal tract: mechanisms involved in the</td><td>Critical Reviews in Food Science an</td><td class='num'>26</td></tr><tr><td>2024.0</td><td>Dietary (poly)phenols and cardiometabolic health: from antioxidants to modu</td><td>Proceedings of The Nutrition Societ</td><td class='num'>20</td></tr><tr><td>2023.0</td><td>Impact of polyphenol oxidase on the bioavailability of flavan-3-ols in frui</td><td>Food & Function</td><td class='num'>17</td></tr><tr><td>2022.0</td><td>Effect of an (–)-Epicatechin Intake on Cardiometabolic Parameters—A Systema</td><td>Nutrients</td><td class='num'>17</td></tr><tr><td>2023.0</td><td>Effect of cocoa extract supplementation on cognitive function: results from</td><td>American Journal of Clinical Nutrit</td><td class='num'>15</td></tr><tr><td>2023.0</td><td>Flavan-3-ol-methylxanthine interactions: Modulation of flavan-3-ol bioavail</td><td>Free Radical Biology and Medicine</td><td class='num'>13</td></tr><tr><td>2022.0</td><td>Assessing Variability in Vascular Response to Cocoa With Personal Devices: </td><td>Frontiers in Nutrition</td><td class='num'>12</td></tr><tr><td>2023.0</td><td>Cocoa Extract Supplementation and Risk of Type 2 Diabetes: The Cocoa Supple</td><td>Diabetes Care</td><td class='num'>10</td></tr><tr><td>2024.0</td><td>Associations Between Flavonoid Intake and Subclinical Atherosclerosis: The </td><td>Arteriosclerosis Thrombosis and Vas</td><td class='num'>9</td></tr><tr><td>2023.0</td><td>Association of dietary flavan-3-ol intakes with plasma phenyl-γ-valerolacto</td><td>American Journal of Clinical Nutrit</td><td class='num'>8</td></tr><tr><td>2025.0</td><td>Impact of flavan-3-ols on blood pressure and endothelial function in divers</td><td>European Journal of Preventive Card</td><td class='num'>6</td></tr><tr><td>2023.0</td><td>Performance of Urinary Phenyl-γ-Valerolactones as Biomarkers of Dietary Fla</td><td>Journal of Nutrition</td><td class='num'>5</td></tr>
+    </table>
+  </div>
+  
+</div>
+
+</div><!-- /app -->
+
+<script>
+const ELEMENTS = [{"data": {"id": "https://openalex.org/W4221025812", "label": "Effect of cocoa flavanol suppl\u2026", "title": "Effect of cocoa flavanol supplementation for the prevention of cardiovascular disease events: the COcoa Supplement and Multivitamin Outcomes Study (COSMOS) randomized clinical trial", "year": 2022, "citations": 172, "journal": "American Journal of Clinical Nutrition", "role": "focal", "color": "#EF553B", "size": 90, "focal": true}}, {"data": {"id": "https://openalex.org/W4310720069", "label": "Micronutrient Supplementation \u2026", "title": "Micronutrient Supplementation to Reduce Cardiovascular Risk", "year": 2022, "citations": 185, "journal": "Journal of the American College of Cardiology", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4300689302", "label": "Flavan-3-ols and Cardiometabol\u2026", "title": "Flavan-3-ols and Cardiometabolic Health: First Ever Dietary Bioactive Guideline", "year": 2022, "citations": 101, "journal": "Advances in Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4309717783", "label": "From Cocoa to Chocolate: Effec\u2026", "title": "From Cocoa to Chocolate: Effect of Processing on Flavanols and Methylxanthines and Their Mechanisms of Action", "year": 2022, "citations": 81, "journal": "International Journal of Molecular Sciences", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4295665715", "label": "Effects of cocoa extract and a\u2026", "title": "Effects of cocoa extract and a multivitamin on cognitive function: A randomized clinical trial", "year": 2022, "citations": 79, "journal": "Alzheimer s & Dementia", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4301370418", "label": "Revisiting the bioavailability\u2026", "title": "Revisiting the bioavailability of flavan-3-ols in humans: A systematic review and comprehensive data analysis", "year": 2022, "citations": 63, "journal": "Molecular Aspects of Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4378783722", "label": "Dietary flavanols restore hipp\u2026", "title": "Dietary flavanols restore hippocampal-dependent memory in older adults with lower diet quality and lower habitual flavanol consumption", "year": 2023, "citations": 50, "journal": "Proceedings of the National Academy of Sciences", "role": "cites_focal", "color": "#AB63FA", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4390988321", "label": "Effect of multivitamin-mineral\u2026", "title": "Effect of multivitamin-mineral supplementation versus placebo on cognitive function: results from the clinic subcohort of the COcoa Supplement and Multivitamin Outcomes Study (COSMOS) randomized clinical trial and meta-analysis of 3 cognitive studies within COSMOS", "year": 2024, "citations": 35, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 84.50334089220998, "focal": false}}, {"data": {"id": "https://openalex.org/W4391359477", "label": "Potential of dietary polypheno\u2026", "title": "Potential of dietary polyphenols for protection from age-related decline and neurodegeneration: a role for gut microbiota?", "year": 2024, "citations": 32, "journal": "Nutritional Neuroscience", "role": "cites_focal", "color": "#AB63FA", "size": 82.93713610639665, "focal": false}}, {"data": {"id": "https://openalex.org/W4292454902", "label": "Proanthocyanidins at the gastr\u2026", "title": "Proanthocyanidins at the gastrointestinal tract: mechanisms involved in their capacity to mitigate obesity-associated metabolic disorders", "year": 2022, "citations": 26, "journal": "Critical Reviews in Food Science and Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 79.32506358807792, "focal": false}}, {"data": {"id": "https://openalex.org/W4392489483", "label": "Dietary (poly)phenols and card\u2026", "title": "Dietary (poly)phenols and cardiometabolic health: from antioxidants to modulators of the gut microbiota", "year": 2024, "citations": 20, "journal": "Proceedings of The Nutrition Society", "role": "cites_focal", "color": "#AB63FA", "size": 74.80140387902162, "focal": false}}, {"data": {"id": "https://openalex.org/W4307291208", "label": "Effect of an (\u2013)-Epicatechin I\u2026", "title": "Effect of an (\u2013)-Epicatechin Intake on Cardiometabolic Parameters\u2014A Systematic Review of Randomized Controlled Trials", "year": 2022, "citations": 17, "journal": "Nutrients", "role": "cites_focal", "color": "#AB63FA", "size": 72.02669164213097, "focal": false}}, {"data": {"id": "https://openalex.org/W4386116725", "label": "Impact of polyphenol oxidase o\u2026", "title": "Impact of polyphenol oxidase on the bioavailability of flavan-3-ols in fruit smoothies: a controlled, single blinded, cross-over study", "year": 2023, "citations": 17, "journal": "Food & Function", "role": "cites_focal", "color": "#AB63FA", "size": 72.02669164213097, "focal": false}}, {"data": {"id": "https://openalex.org/W4389433571", "label": "Effect of cocoa extract supple\u2026", "title": "Effect of cocoa extract supplementation on cognitive function: results from the clinic subcohort of the COSMOS trial", "year": 2023, "citations": 15, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 69.90659700031605, "focal": false}}, {"data": {"id": "https://openalex.org/W4313561544", "label": "Flavan-3-ol-methylxanthine int\u2026", "title": "Flavan-3-ol-methylxanthine interactions: Modulation of flavan-3-ol bioavailability in volunteers with a functional colon and an ileostomy", "year": 2023, "citations": 13, "journal": "Free Radical Biology and Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 67.50303193307465, "focal": false}}, {"data": {"id": "https://openalex.org/W4282596599", "label": "Assessing Variability in Vascu\u2026", "title": "Assessing Variability in Vascular Response to Cocoa With Personal Devices: A Series of Double-Blind Randomized Crossover n-of-1 Trials", "year": 2022, "citations": 12, "journal": "Frontiers in Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 66.16908843430767, "focal": false}}, {"data": {"id": "https://openalex.org/W4387490647", "label": "Cocoa Extract Supplementation \u2026", "title": "Cocoa Extract Supplementation and Risk of Type 2 Diabetes: The Cocoa Supplement and Multivitamin Outcomes Study (COSMOS) Randomized Clinical Trial", "year": 2023, "citations": 10, "journal": "Diabetes Care", "role": "cites_focal", "color": "#AB63FA", "size": 63.162114910370676, "focal": false}}, {"data": {"id": "https://openalex.org/W4402492995", "label": "Associations Between Flavonoid\u2026", "title": "Associations Between Flavonoid Intake and Subclinical Atherosclerosis: The Multi-Ethnic Study of Atherosclerosis", "year": 2024, "citations": 9, "journal": "Arteriosclerosis Thrombosis and Vascular Biology", "role": "cites_focal", "color": "#AB63FA", "size": 61.44653167389283, "focal": false}}, {"data": {"id": "https://openalex.org/W4380201131", "label": "Association of dietary flavan-\u2026", "title": "Association of dietary flavan-3-ol intakes with plasma phenyl-\u03b3-valerolactones: analysis from the TUDA cohort of healthy older adults", "year": 2023, "citations": 8, "journal": "American Journal of Clinical Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 59.55004239205195, "focal": false}}, {"data": {"id": "https://openalex.org/W4408808779", "label": "Impact of flavan-3-ols on bloo\u2026", "title": "Impact of flavan-3-ols on blood pressure and endothelial function in diverse populations: a systematic review and meta-analysis of randomized controlled trials", "year": 2025, "citations": 6, "journal": "European Journal of Preventive Cardiology", "role": "cites_focal", "color": "#AB63FA", "size": 55.02638268299564, "focal": false}}, {"data": {"id": "https://openalex.org/W4382680833", "label": "Performance of Urinary Phenyl-\u2026", "title": "Performance of Urinary Phenyl-\u03b3-Valerolactones as Biomarkers of Dietary Flavan-3-ol Exposure", "year": 2023, "citations": 5, "journal": "Journal of Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 52.25167044610499, "focal": false}}, {"data": {"id": "https://openalex.org/W7134273425", "label": "Effects of daily multivitamin\u2013\u2026", "title": "Effects of daily multivitamin\u2013multimineral and cocoa extract supplementation on epigenetic aging clocks in the COSMOS randomized clinical trial", "year": 2026, "citations": 5, "journal": "Nature Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 52.25167044610499, "focal": false}}, {"data": {"id": "https://openalex.org/W4367022504", "label": "Cocoa flavanol supplementation\u2026", "title": "Cocoa flavanol supplementation preserves early and late radial artery function after transradial catheterization", "year": 2023, "citations": 4, "journal": "Food & Function", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4383681419", "label": "5\u2010(3\u2032,4\u2032\u2010Dihydroxyphenyl)\u2010\u03b3\u2010Va\u2026", "title": "5\u2010(3\u2032,4\u2032\u2010Dihydroxyphenyl)\u2010\u03b3\u2010Valerolactone Is a Substrate for Human Paraoxonase: A Novel Pathway in Flavan\u20103\u2010ol Metabolism", "year": 2023, "citations": 4, "journal": "Molecular Nutrition & Food Research", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4385241032", "label": "Cocoa flavanols improve peakVO\u2026", "title": "Cocoa flavanols improve peakVO<sub>2</sub> and exercise capacity in a randomized double blinded clinical trial in healthy elderly people", "year": 2023, "citations": 4, "journal": "Food & Function", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4392714162", "label": "New light on changes in the nu\u2026", "title": "New light on changes in the number and function of blood platelets stimulated by cocoa and its products", "year": 2024, "citations": 4, "journal": "Frontiers in Pharmacology", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4408225622", "label": "Biomarkers of (poly)phenol int\u2026", "title": "Biomarkers of (poly)phenol intake: a systematic review", "year": 2025, "citations": 4, "journal": "Critical Reviews in Food Science and Nutrition", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4414372068", "label": "Effects of 2-year cocoa extrac\u2026", "title": "Effects of 2-year cocoa extract supplementation on inflammaging biomarkers in older US adults: findings from the COcoa Supplement and Multivitamin Outcomes Study randomised clinical trial", "year": 2025, "citations": 4, "journal": "Age and Ageing", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4415651690", "label": "Dietary flavanols preserve upp\u2026", "title": "Dietary flavanols preserve upper\u2010 and lower\u2010limb endothelial function during sitting in high\u2010 and low\u2010fit young healthy males", "year": 2025, "citations": 4, "journal": "The Journal of Physiology", "role": "cites_focal", "color": "#AB63FA", "size": 48.9698824238138, "focal": false}}, {"data": {"id": "https://openalex.org/W4391309346", "label": "Effects of flavanols and procy\u2026", "title": "Effects of flavanols and procyanidins-rich cocoa consumption on metabolic syndrome: an update review (2013-2023)", "year": 2024, "citations": 3, "journal": "Bioscience Biotechnology and Biochemistry", "role": "cites_focal", "color": "#AB63FA", "size": 44.95329850015803, "focal": false}}, {"data": {"id": "https://openalex.org/W4405704160", "label": "An immunohistochemical evaluat\u2026", "title": "An immunohistochemical evaluation of fast twitch muscle formation induced by repeated administration of flavan 3\u2010ols in mice", "year": 2024, "citations": 3, "journal": "The FASEB Journal", "role": "cites_focal", "color": "#AB63FA", "size": 44.95329850015803, "focal": false}}, {"data": {"id": "https://openalex.org/W4407679637", "label": "Effects of cocoa extract suppl\u2026", "title": "Effects of cocoa extract supplementation and multivitamin/multimineral supplements on self-reported fractures in the Cocoa Supplement and Multivitamins Outcomes Study randomized clinical trial", "year": 2025, "citations": 3, "journal": "Journal of Bone and Mineral Research", "role": "cites_focal", "color": "#AB63FA", "size": 44.95329850015803, "focal": false}}, {"data": {"id": "https://openalex.org/W4408905340", "label": "Cocoa Flavanol Supplementation\u2026", "title": "Cocoa Flavanol Supplementation and Risk of Age-Related Macular Degeneration", "year": 2025, "citations": 3, "journal": "JAMA Ophthalmology", "role": "cites_focal", "color": "#AB63FA", "size": 44.95329850015803, "focal": false}}, {"data": {"id": "https://openalex.org/W4413337984", "label": "Long-Term Effect of Cocoa Extr\u2026", "title": "Long-Term Effect of Cocoa Extract Supplementation on Incident Hypertension", "year": 2025, "citations": 3, "journal": "Hypertension", "role": "cites_focal", "color": "#AB63FA", "size": 44.95329850015803, "focal": false}}, {"data": {"id": "https://openalex.org/W4313555476", "label": "Rationale and design of an anc\u2026", "title": "Rationale and design of an ancillary study evaluating the effects of the cocoa flavanol and/or multivitamin interventions on falls and physical performance outcomes in the COcoa Supplement and Multivitamin Outcomes Study (COSMOS)", "year": 2023, "citations": 2, "journal": "Contemporary Clinical Trials", "role": "cites_focal", "color": "#AB63FA", "size": 39.775021196025975, "focal": false}}, {"data": {"id": "https://openalex.org/W4383371935", "label": "Definition of system suitabili\u2026", "title": "Definition of system suitability and proficiency testing acceptance criteria for the standardization of quality control methodologies of botanical bioactives: A case study for the development of AOAC Official Method of Analysis 2020.05 flavanols and procyanidins", "year": 2023, "citations": 2, "journal": "Food Research International", "role": "cites_focal", "color": "#AB63FA", "size": 39.775021196025975, "focal": false}}, {"data": {"id": "https://openalex.org/W7117481906", "label": "Advance in neuroprotective eff\u2026", "title": "Advance in neuroprotective effects of proanthocyanidins (PCs): Structure, absorption, bioactivities, mechanism, and perspectives", "year": 2025, "citations": 2, "journal": "Pharmacological Research", "role": "cites_focal", "color": "#AB63FA", "size": 39.775021196025975, "focal": false}}, {"data": {"id": "https://openalex.org/W4387967974", "label": "Automated High-Throughput Quan\u2026", "title": "Automated High-Throughput Quantification of Phenyl-\u03b3-valerolactones and Creatinine in Urine by Laser Diode Thermal Desorption", "year": 2023, "citations": 1, "journal": "Journal of Agricultural and Food Chemistry", "role": "cites_focal", "color": "#AB63FA", "size": 32.476649250079014, "focal": false}}, {"data": {"id": "https://openalex.org/W4406269345", "label": "Sensory Characteristics and Im\u2026", "title": "Sensory Characteristics and Impact of Flavanol-Rich Grape and Blueberry Extract on Blood Flow Velocity and Oxidative Stress", "year": 2025, "citations": 1, "journal": "Journal of Dietary Supplements", "role": "cites_focal", "color": "#AB63FA", "size": 32.476649250079014, "focal": false}}, {"data": {"id": "https://openalex.org/W4411604305", "label": "The Impact of Cocoa Flavanols \u2026", "title": "The Impact of Cocoa Flavanols in Modulating Resting Cerebral Blood Flow During Prolonged Sitting in Healthy Young and Older Adults", "year": 2025, "citations": 1, "journal": "Nutrients", "role": "cites_focal", "color": "#AB63FA", "size": 32.476649250079014, "focal": false}}, {"data": {"id": "https://openalex.org/W4323826312", "label": "Performance of urinary phenyl-\u2026", "title": "Performance of urinary phenyl-\u03b3-valerolactones as biomarkers of dietary flavan-3-ol exposure", "year": 2023, "citations": 0, "journal": "medRxiv", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4367173123", "label": "Cocoa flavanols improve peakVO\u2026", "title": "Cocoa flavanols improve peakVO <sub>2</sub> and exercise capacity in a randomized double blinded clinical trial in healthy elderly", "year": 2023, "citations": 0, "journal": "medRxiv", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4388036659", "label": "Reliance on self-reports and e\u2026", "title": "Reliance on self-reports and estimated food composition data in nutrition research introduces significant bias that can only be addressed with biomarkers", "year": 2023, "citations": 0, "journal": "bioRxiv (Cold Spring Harbor Laboratory)", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4391469573", "label": "Reliance on self-reports and e\u2026", "title": "Reliance on self-reports and estimated food composition data in nutrition research introduces significant bias that can only be addressed with biomarkers", "year": 2024, "citations": 0, "journal": "eLife", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4393158081", "label": "Sensory Properties, Redox Char\u2026", "title": "Sensory Properties, Redox Characteristics, and Impact on the Hemodynamics of the Flavanol-Rich Fraction Originated Grape and Blueberry", "year": 2024, "citations": 0, "journal": "Preprints.org", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4399221975", "label": "Reliance on self-reports and e\u2026", "title": "Reliance on self-reports and estimated food composition data in nutrition research introduces significant bias that can only be addressed with biomarkers", "year": 2024, "citations": 0, "journal": "eLife", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4400570499", "label": "Cocoa flavanol supplementation\u2026", "title": "Cocoa flavanol supplementation and incident atrial fibrillation in the COSMOS trial", "year": 2024, "citations": 0, "journal": "European Journal of Preventive Cardiology", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4408008088", "label": "The overlooked impact of backg\u2026", "title": "The overlooked impact of background diet and adherence in nutrition trials", "year": 2025, "citations": 0, "journal": "medRxiv", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4408568742", "label": "A comparative analysis of the \u2026", "title": "A comparative analysis of the impact of repeated administration of flavan 3-ol on brown, subcutaneous, and visceral adipose tissue", "year": 2025, "citations": 0, "journal": "Open Medicine", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W4415614985", "label": "Cocoa flavanols alleviate earl\u2026", "title": "Cocoa flavanols alleviate early diastolic dysfunction by decreasing left atrial volume in a randomized double blinded trial in healthy older individuals", "year": 2025, "citations": 0, "journal": "Food & Function", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W7128243597", "label": "Effects of Cocoa Extract and M\u2026", "title": "Effects of Cocoa Extract and Multivitamin Supplementation on Venous Thromboembolism in the COSMOS Trial", "year": 2026, "citations": 0, "journal": "Thrombosis and Haemostasis", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W7138913919", "label": "Cocoa flavanol supplementation\u2026", "title": "Cocoa flavanol supplementation and prevention of cardiovascular disease: a novel analysis of the COSMOS randomized trial using \u201cwin ratio\u201d", "year": 2026, "citations": 0, "journal": "European Journal of Epidemiology", "role": "cites_focal", "color": "#AB63FA", "size": 20, "focal": false}}, {"data": {"id": "https://openalex.org/W2100116730", "label": "(\u2013)-Epicatechin mediates benef\u2026", "title": "(\u2013)-Epicatechin mediates beneficial effects of flavanol-rich cocoa on vascular function in humans", "year": 2006, "citations": 1044, "journal": "Proceedings of the National Academy of Sciences", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1971005475", "label": "Flavan\u20103\u2010ols: Nature, occurren\u2026", "title": "Flavan\u20103\u2010ols: Nature, occurrence and biological activity", "year": 2007, "citations": 745, "journal": "Molecular Nutrition & Food Research", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2129761592", "label": "Effects of chocolate, cocoa, a\u2026", "title": "Effects of chocolate, cocoa, and flavan-3-ols on cardiovascular health: a systematic review and meta-analysis of randomized trials", "year": 2012, "citations": 604, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2135690475", "label": "Cocoa Reduces Blood Pressure a\u2026", "title": "Cocoa Reduces Blood Pressure and Insulin Resistance and Improves Endothelium-Dependent Vasodilation in Hypertensives", "year": 2005, "citations": 546, "journal": "Hypertension", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2138657506", "label": "Flavonoid intake and cardiovas\u2026", "title": "Flavonoid intake and cardiovascular disease mortality in a prospective cohort of US adults", "year": 2012, "citations": 532, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2108909778", "label": "Habitual intake of flavonoid s\u2026", "title": "Habitual intake of flavonoid subclasses and incident hypertension in adults", "year": 2010, "citations": 502, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1865499935", "label": "Effect of cocoa on blood press\u2026", "title": "Effect of cocoa on blood pressure", "year": 2017, "citations": 259, "journal": "Cochrane Database of Systematic Reviews", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2464063195", "label": "The metabolome of [2-14C](\u2212)-e\u2026", "title": "The metabolome of [2-14C](\u2212)-epicatechin in humans: implications for the assessment of efficacy, safety and mechanisms of action of polyphenolic bioactives", "year": 2016, "citations": 253, "journal": "Scientific Reports", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2328652644", "label": "Dietary flavonoids and the dev\u2026", "title": "Dietary flavonoids and the development of type 2 diabetes and cardiovascular diseases", "year": 2012, "citations": 211, "journal": "Current Opinion in Lipidology", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2101949991", "label": "Flavanols and cardiovascular d\u2026", "title": "Flavanols and cardiovascular disease prevention", "year": 2010, "citations": 192, "journal": "European Heart Journal", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2170220685", "label": "Flavonoid intake and the risk \u2026", "title": "Flavonoid intake and the risk of ischaemic stroke and CVD mortality in middle-aged Finnish men: the Kuopio Ischaemic Heart Disease Risk Factor Study", "year": 2008, "citations": 181, "journal": "British Journal Of Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2100550221", "label": "Cocoa flavanol intake improves\u2026", "title": "Cocoa flavanol intake improves endothelial function and Framingham Risk Score in healthy men and women: a randomised, controlled, double-masked trial: the Flaviola Health Study", "year": 2015, "citations": 170, "journal": "British Journal Of Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W4237610197", "label": "Effect of cocoa on blood press\u2026", "title": "Effect of cocoa on blood pressure", "year": 2012, "citations": 149, "journal": "Cochrane Database of Systematic Reviews", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2524498625", "label": "Cocoa Flavanol Intake and Biom\u2026", "title": "Cocoa Flavanol Intake and Biomarkers for Cardiometabolic Health: A Systematic Review and Meta-Analysis of Randomized Controlled Trials", "year": 2016, "citations": 147, "journal": "Journal of Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2068306554", "label": "Recommending flavanols and pro\u2026", "title": "Recommending flavanols and procyanidins for cardiovascular health: Current knowledge and future needs", "year": 2010, "citations": 120, "journal": "Molecular Aspects of Medicine", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2162016314", "label": "Assessment of the dietary inta\u2026", "title": "Assessment of the dietary intake of total flavan-3-ols, monomeric flavan-3-ols, proanthocyanidins and theaflavins in the European Union", "year": 2013, "citations": 118, "journal": "British Journal Of Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2562865239", "label": "Methylxanthines enhance the ef\u2026", "title": "Methylxanthines enhance the effects of cocoa flavanols on cardiovascular function: randomized, double-masked controlled studies", "year": 2016, "citations": 116, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2971353076", "label": "Dietary intakes of flavan-3-ol\u2026", "title": "Dietary intakes of flavan-3-ols and cardiometabolic health: systematic review and meta-analysis of randomized trials and prospective cohort studies", "year": 2019, "citations": 104, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1978635323", "label": "Dietary flavonoids as cancer-p\u2026", "title": "Dietary flavonoids as cancer-preventive and therapeutic biofactors", "year": 2011, "citations": 103, "journal": "Frontiers in Bioscience-Scholar", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2168443082", "label": "Dietary flavonoid and lignan i\u2026", "title": "Dietary flavonoid and lignan intake and gastric adenocarcinoma risk in the European Prospective Investigation into Cancer and Nutrition (EPIC) study", "year": 2012, "citations": 92, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2042484537", "label": "The effect of alkalization on \u2026", "title": "The effect of alkalization on the bioactive and flavor related components in commercial cocoa powder", "year": 2011, "citations": 88, "journal": "Journal of Food Composition and Analysis", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2792776809", "label": "Recommending flavanols and pro\u2026", "title": "Recommending flavanols and procyanidins for cardiovascular health: Revisited", "year": 2018, "citations": 84, "journal": "Molecular Aspects of Medicine", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1996323730", "label": "Dose-related effects of flavan\u2026", "title": "Dose-related effects of flavanol-rich cocoa on blood pressure", "year": 2010, "citations": 76, "journal": "Journal of Human Hypertension", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2810015523", "label": "Evaluation at scale of microbi\u2026", "title": "Evaluation at scale of microbiome-derived metabolites as biomarker of flavan-3-ol intake in epidemiological studies", "year": 2018, "citations": 71, "journal": "Scientific Reports", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2891604427", "label": "Assessing the respective contr\u2026", "title": "Assessing the respective contributions of dietary flavanol monomers and procyanidins in mediating cardiovascular effects in humans: randomized, controlled, double-masked intervention trial", "year": 2018, "citations": 58, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2972901565", "label": "Dose\u2013response relationship bet\u2026", "title": "Dose\u2013response relationship between cocoa flavanols and human endothelial function: a systematic review and meta-analysis of randomized trials", "year": 2019, "citations": 57, "journal": "Food & Function", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2166435424", "label": "Safety and efficacy of cocoa f\u2026", "title": "Safety and efficacy of cocoa flavanol intake in healthy adults: a randomized, controlled, double-masked trial", "year": 2015, "citations": 53, "journal": "American Journal of Clinical Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2122694669", "label": "The intake of flavonoids and c\u2026", "title": "The intake of flavonoids and carotid atherosclerosis: the Kuopio Ischaemic Heart Disease Risk Factor Study", "year": 2007, "citations": 52, "journal": "British Journal Of Nutrition", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W1939197356", "label": "Dietary flavonoid for preventi\u2026", "title": "Dietary flavonoid for preventing colorectal neoplasms", "year": 2012, "citations": 49, "journal": "Cochrane Database of Systematic Reviews", "role": "cited_by_focal", "color": "#00CC96", "size": 90, "focal": false}}, {"data": {"id": "https://openalex.org/W2768723225", "label": "Nutrition epidemiology of flav\u2026", "title": "Nutrition epidemiology of flavan-3-ols: The known unknowns", "year": 2017, "citations": 39, "journal": "Molecular Aspects of Medicine", "role": "cited_by_focal", "color": "#00CC96", "size": 86.39983017405085, "focal": false}}, {"data": {"id": "https://openalex.org/W2344322722", "label": "Dark chocolate attenuates intr\u2026", "title": "Dark chocolate attenuates intracellular pro-inflammatory reactivity to acute psychosocial stress in men: A randomized controlled trial", "year": 2016, "citations": 35, "journal": "Brain Behavior and Immunity", "role": "cited_by_focal", "color": "#00CC96", "size": 84.50334089220998, "focal": false}}, {"data": {"id": "https://openalex.org/W4220791765", "label": "Design and baseline characteri\u2026", "title": "Design and baseline characteristics of participants in the COcoa Supplement and Multivitamin Outcomes Study (COSMOS)", "year": 2022, "citations": 35, "journal": "Contemporary Clinical Trials", "role": "cited_by_focal", "color": "#00CC96", "size": 84.50334089220998, "focal": false}}, {"data": {"id": "https://openalex.org/W2101157511", "label": "Chocolate flavanols and skin p\u2026", "title": "Chocolate flavanols and skin photoprotection: a parallel, double-blind, randomized clinical trial", "year": 2014, "citations": 33, "journal": "Nutrition Journal", "role": "cited_by_focal", "color": "#00CC96", "size": 83.4744894430909, "focal": false}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2100116730", "id": "https://openalex.org/W4221025812__https://openalex.org/W2100116730"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W1971005475", "id": "https://openalex.org/W4221025812__https://openalex.org/W1971005475"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2129761592", "id": "https://openalex.org/W4221025812__https://openalex.org/W2129761592"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2135690475", "id": "https://openalex.org/W4221025812__https://openalex.org/W2135690475"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2138657506", "id": "https://openalex.org/W4221025812__https://openalex.org/W2138657506"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2108909778", "id": "https://openalex.org/W4221025812__https://openalex.org/W2108909778"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W1865499935", "id": "https://openalex.org/W4221025812__https://openalex.org/W1865499935"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2464063195", "id": "https://openalex.org/W4221025812__https://openalex.org/W2464063195"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2328652644", "id": "https://openalex.org/W4221025812__https://openalex.org/W2328652644"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2101949991", "id": "https://openalex.org/W4221025812__https://openalex.org/W2101949991"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2170220685", "id": "https://openalex.org/W4221025812__https://openalex.org/W2170220685"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2100550221", "id": "https://openalex.org/W4221025812__https://openalex.org/W2100550221"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W4237610197", "id": "https://openalex.org/W4221025812__https://openalex.org/W4237610197"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2524498625", "id": "https://openalex.org/W4221025812__https://openalex.org/W2524498625"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2068306554", "id": "https://openalex.org/W4221025812__https://openalex.org/W2068306554"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2162016314", "id": "https://openalex.org/W4221025812__https://openalex.org/W2162016314"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2562865239", "id": "https://openalex.org/W4221025812__https://openalex.org/W2562865239"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2971353076", "id": "https://openalex.org/W4221025812__https://openalex.org/W2971353076"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W1978635323", "id": "https://openalex.org/W4221025812__https://openalex.org/W1978635323"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2168443082", "id": "https://openalex.org/W4221025812__https://openalex.org/W2168443082"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2042484537", "id": "https://openalex.org/W4221025812__https://openalex.org/W2042484537"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2792776809", "id": "https://openalex.org/W4221025812__https://openalex.org/W2792776809"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W1996323730", "id": "https://openalex.org/W4221025812__https://openalex.org/W1996323730"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2810015523", "id": "https://openalex.org/W4221025812__https://openalex.org/W2810015523"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2891604427", "id": "https://openalex.org/W4221025812__https://openalex.org/W2891604427"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2972901565", "id": "https://openalex.org/W4221025812__https://openalex.org/W2972901565"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2166435424", "id": "https://openalex.org/W4221025812__https://openalex.org/W2166435424"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2122694669", "id": "https://openalex.org/W4221025812__https://openalex.org/W2122694669"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W1939197356", "id": "https://openalex.org/W4221025812__https://openalex.org/W1939197356"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2768723225", "id": "https://openalex.org/W4221025812__https://openalex.org/W2768723225"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2344322722", "id": "https://openalex.org/W4221025812__https://openalex.org/W2344322722"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W4220791765", "id": "https://openalex.org/W4221025812__https://openalex.org/W4220791765"}}, {"data": {"source": "https://openalex.org/W4221025812", "target": "https://openalex.org/W2101157511", "id": "https://openalex.org/W4221025812__https://openalex.org/W2101157511"}}, {"data": {"source": "https://openalex.org/W4310720069", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4310720069__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4300689302", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4300689302__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4309717783", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4309717783__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4295665715", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4295665715__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4301370418", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4301370418__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4378783722", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4378783722__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4390988321", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4390988321__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4391359477", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4391359477__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4292454902", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4292454902__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4392489483", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4392489483__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4307291208", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4307291208__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4386116725", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4386116725__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4389433571", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4389433571__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4313561544", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4313561544__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4282596599", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4282596599__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4387490647", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4387490647__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4402492995", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4402492995__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4380201131", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4380201131__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4408808779", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4408808779__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4382680833", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4382680833__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W7134273425", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W7134273425__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4367022504", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4367022504__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4383681419", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4383681419__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4385241032", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4385241032__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4392714162", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4392714162__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4408225622", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4408225622__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4414372068", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4414372068__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4415651690", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4415651690__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4391309346", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4391309346__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4405704160", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4405704160__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4407679637", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4407679637__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4408905340", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4408905340__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4413337984", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4413337984__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4313555476", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4313555476__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4383371935", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4383371935__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W7117481906", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W7117481906__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4387967974", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4387967974__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4406269345", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4406269345__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4411604305", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4411604305__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4323826312", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4323826312__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4367173123", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4367173123__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4388036659", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4388036659__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4391469573", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4391469573__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4393158081", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4393158081__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4399221975", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4399221975__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4400570499", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4400570499__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4408008088", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4408008088__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4408568742", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4408568742__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W4415614985", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W4415614985__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W7128243597", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W7128243597__https://openalex.org/W4221025812"}}, {"data": {"source": "https://openalex.org/W7138913919", "target": "https://openalex.org/W4221025812", "id": "https://openalex.org/W7138913919__https://openalex.org/W4221025812"}}];
+const FOCAL_ID = "https://openalex.org/W4221025812";
+
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements: ELEMENTS,
+  style: [
+    {
+      selector: 'node',
+      style: {
+        'background-color':  'data(color)',
+        'width':             'data(size)',
+        'height':            'data(size)',
+        'label':             'data(label)',
+        'font-size':         '9px',
+        'text-valign':       'bottom',
+        'text-halign':       'center',
+        'text-margin-y':     '3px',
+        'text-wrap':         'wrap',
+        'text-max-width':    '100px',
+        'color':             '#333',
+        'text-outline-color':'#fff',
+        'text-outline-width':'1.5px',
+        'border-width':      0,
+        'z-index':           1,
+      }
+    },
+    {
+      selector: 'node[?focal]',
+      style: {
+        'shape':         'star',
+        'border-width':  3,
+        'border-color':  '#b02010',
+        'font-size':     '10px',
+        'font-weight':   'bold',
+        'z-index':       10,
+      }
+    },
+    {
+      selector: 'node:selected',
+      style: {
+        'border-width': 3,
+        'border-color': '#2980b9',
+        'z-index': 20,
+      }
+    },
+    {
+      selector: 'edge',
+      style: {
+        'width':              1,
+        'line-color':         '#c8d0da',
+        'target-arrow-color': '#a0a8b8',
+        'target-arrow-shape': 'triangle',
+        'arrow-scale':        0.7,
+        'curve-style':        'bezier',
+        'opacity':            0.6,
+      }
+    },
+    {
+      selector: 'edge:selected',
+      style: { 'opacity': 1, 'width': 2, 'line-color': '#2980b9' }
+    },
+    {
+      selector: '.hidden',
+      style: { 'display': 'none' }
+    },
+  ],
+  layout: { name: 'cose', animate: true, animationDuration: 600,
+             nodeRepulsion: 8000, idealEdgeLength: 80, gravity: 0.25 },
+  wheelSensitivity: 0.3,
+});
+
+// ── Node detail panel ──
+cy.on('tap', 'node', function(e) {
+  const d = e.target.data();
+  const doi = d.id && d.id.startsWith('http') ? d.id : '';
+  document.getElementById('detail-content').innerHTML =
+    `<div class="dt">${d.title || d.label}</div>` +
+    `<div style="margin-top:.4em">Year: ${d.year || '—'} &nbsp;|&nbsp; `+
+    `Citations: ${d.citations}</div>` +
+    `<div style="color:#666;margin-top:.2em">${d.journal || ''}</div>` +
+    (doi ? `<div style="margin-top:.4em"><a href="${d.id}" target="_blank">OpenAlex ↗</a></div>` : '');
+});
+cy.on('tap', function(e) {
+  if (e.target === cy)
+    document.getElementById('detail-content').innerHTML =
+      '<span class="hint">Click a node to see details</span>';
+});
+
+// ── Layout control ──
+function runLayout(name) {
+  const opts = {
+    name,
+    animate: true, animationDuration: 500, fit: true, padding: 30,
+    ...(name === 'cose' ? { nodeRepulsion: 8000, idealEdgeLength: 80, gravity: 0.25 } : {}),
+    ...(name === 'concentric' ? {
+      concentric: n => {
+        const r = n.data('role');
+        return r === 'focal' ? 4 : r === 'cited_by_focal' ? 3 :
+               r === 'cites_focal' ? 2 : 1;
+      },
+      levelWidth: () => 1,
+    } : {}),
+  };
+  cy.layout(opts).run();
+}
+document.getElementById('layout-sel').addEventListener('change', e => runLayout(e.target.value));
+document.getElementById('fit-btn').addEventListener('click', () => cy.fit(30));
+document.getElementById('reset-btn').addEventListener('click', () => {
+  runLayout(document.getElementById('layout-sel').value);
+});
+
+// ── Label toggle ──
+document.getElementById('label-sel').addEventListener('change', e => {
+  cy.nodes().style('label', e.target.value === 'on' ? 'data(label)' : '');
+});
+
+// ── Filter chips ──
+const activeRoles = new Set(['focal','cites_focal','cited_by_focal','citing_depth2']);
+document.getElementById('filter-chips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  const role = chip.dataset.role;
+  if (role === 'focal') return;  // never hide focal
+  if (activeRoles.has(role)) {
+    activeRoles.delete(role);
+    chip.classList.replace('active','inactive');
+    cy.nodes(`[role = "${role}"]`).addClass('hidden');
+  } else {
+    activeRoles.add(role);
+    chip.classList.replace('inactive','active');
+    cy.nodes(`[role = "${role}"]`).removeClass('hidden');
+  }
+});
+
+// ── Tab switching ──
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  tab.classList.add('active');
+  const panel = document.getElementById('tab-' + tab.dataset.tab);
+  if (panel) panel.classList.add('active');
+});
+
+cy.fit(30);
+</script>
+</body>
+</html>

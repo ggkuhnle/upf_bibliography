@@ -249,8 +249,12 @@ def main():
     _sdf["citations"] = pd.to_numeric(_sdf["citations"], errors="coerce").fillna(0).astype(int)
     _sdf["year"]      = _sdf["year"].astype(str).str.replace(r"\.0$", "", regex=True)
 
-    # Use pandas to_json to avoid numpy int64 serialisation errors
-    papers_json = _sdf.sort_values("citations", ascending=False).to_json(orient="records")
+    # Embed only the top-N papers: embedding all 300k+ rows produces a file the
+    # browser cannot parse in reasonable time.
+    TABLE_CAP = 10_000
+    _sdf_sorted = _sdf.sort_values("citations", ascending=False)
+    n_table = min(TABLE_CAP, len(_sdf_sorted))
+    papers_json = _sdf_sorted.head(TABLE_CAP).to_json(orient="records")
 
     generated = pd.Timestamp.now().strftime("%B %Y")
     html = f"""<!DOCTYPE html>
@@ -356,7 +360,7 @@ function paperSearch() {{
   const cnt = document.getElementById('paper-count');
   cnt.textContent = q
     ? rows.length + ' result' + (rows.length!==1?'s':'') + ' for "' + document.getElementById('paper-search').value + '"'
-    : 'Showing top 500 of ' + rows.length.toLocaleString() + ' papers — type to filter';
+    : 'Showing top 500 of ' + rows.length.toLocaleString() + ' papers (top {n_table:,} by citations embedded — {n_papers:,} total in corpus)';
   const doi_url = d => d ? `<a href="https://doi.org/${{d}}" target="_blank" style="color:#2980b9">${{d}}</a>` : '';
   document.getElementById('paper-tbody').innerHTML = rows.slice(0,500).map(p =>
     `<tr>
