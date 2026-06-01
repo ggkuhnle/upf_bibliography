@@ -1416,12 +1416,18 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
           ("Most-cited authors bar chart", "")],
          p("citation_network.html")),
         ("c-teal",   "btn-teal",   "Citation Network Explorer",
-         "Fullscreen interactive explorer built on Cytoscape.js — draggable nodes, curved directed arrows, and per-edge paper details.",
+         "Fullscreen interactive Cytoscape.js explorer — top 200 authors, fast to open.",
          [("Colour by country, research cluster, or publication volume", ""),
           ("Path finder: shortest citation path between two authors", ""),
           ("Click any edge to see the papers behind it", "")],
          p("citation_network_cytoscape.html")),
+        ("c-teal",   "btn-teal",   "Citation Network Explorer (full)",
+         "Full citation network — all authors passing the filter. May be slow to open on large corpora.",
+         [("Same features as compact version", ""),
+          ("Includes lower-cited authors", "")],
+         p("citation_network_cytoscape_full.html")),
     ]
+
 
     card_html = ""
     for accent, btn_cls, title, desc, items, href in CARDS:
@@ -1472,8 +1478,8 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
   .stat{{background:rgba(255,255,255,.12);border-radius:10px;padding:12px 24px;text-align:center;min-width:120px}}
   .stat .n{{font-size:1.8rem;font-weight:700;display:block}}
   .stat .l{{font-size:.78rem;opacity:.75;text-transform:uppercase;letter-spacing:.5px}}
-  main{{max-width:900px;margin:0 auto;padding:36px 24px 80px}}
-  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;margin-bottom:48px}}
+  main{{max-width:1100px;margin:0 auto;padding:36px 24px 80px}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px;margin-bottom:48px}}
   .card{{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.07);
         overflow:hidden;display:flex;flex-direction:column;transition:transform .15s,box-shadow .15s}}
   .card:hover{{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.12)}}
@@ -1492,6 +1498,8 @@ def make_index(out, authors_df, institutions_df, country_df, year_df):
   .c-purple{{background:#8e44ad}}.btn-purple{{background:#8e44ad;color:#fff}}
   .c-rose{{background:#e84393}}.btn-rose{{background:#e84393;color:#fff}}
   .c-orange{{background:#e67e22}}.btn-orange{{background:#e67e22;color:#fff}}
+  .c-violet{{background:#5b21b6}}.btn-violet{{background:#5b21b6;color:#fff}}
+  .c-navy{{background:#1e3a5f}}.btn-navy{{background:#1e3a5f;color:#fff}}
   h3.sec{{font-size:1rem;font-weight:700;color:#888;text-transform:uppercase;
           letter-spacing:1px;margin-bottom:16px;padding-bottom:6px;border-bottom:2px solid #eee}}
   .methods{{background:#fff;border-radius:10px;padding:24px 28px;
@@ -1562,9 +1570,11 @@ def main():
     out  = args.output_dir
     data = args.data_dir
 
+    root = os.path.dirname(__file__)
+    scripts_dir = os.path.join(root, "scripts")
+
     if args.fetch:
-        here = os.path.dirname(__file__)
-        script = os.path.join(here, "bibliometrics.py")
+        script = os.path.join(root, "bibliometrics.py")
         print(f"Fetching data (bibliometrics.py) …")
         result = subprocess.run(
             [sys.executable, script, "--output-dir", data],
@@ -1574,8 +1584,6 @@ def main():
             print("bibliometrics.py exited with errors — aborting.")
             sys.exit(result.returncode)
 
-
-    here = os.path.dirname(__file__)
     for script_name, label in [
         ("make_world_map.py",            "Building world map"),
         ("make_interactive_network.py",  "Building interactive network"),
@@ -1587,7 +1595,7 @@ def main():
     ]:
         print(f"{label} ({script_name}) …")
         result = subprocess.run(
-            [sys.executable, os.path.join(here, script_name),
+            [sys.executable, os.path.join(scripts_dir, script_name),
              "--output-dir", out, "--data-dir", data],
             check=False,
         )
@@ -1705,6 +1713,8 @@ def main():
 
     print("Building index…")
     make_index(out, authors_df, institutions_df, country_df, year_df)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":

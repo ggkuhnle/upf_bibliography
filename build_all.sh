@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build all topics and deploy. Flavonoids run last (largest dataset).
-# Usage: ./build_all.sh [--fetch]
+# Build all topics and deploy.
+# make_dashboard.py handles everything for each topic (dashboards + networks).
+# Usage: ./build_all.sh [--fetch] [--no-networks]
 set -euo pipefail
 
-FETCH=""
+ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --fetch) FETCH="--fetch" ;;
+        --fetch) ARGS+=("$arg") ;;
         *) echo "Unknown argument: $arg"; exit 1 ;;
     esac
 done
@@ -14,10 +15,10 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Collect configs, sorting flavonoid to the end
+# Collect configs from config/, sorting flavonoid to the end (largest dataset)
 configs=()
 deferred=()
-for cfg in config.json.*; do
+for cfg in config/config.json.*; do
     if [[ "$cfg" == *flavonoid* ]]; then
         deferred+=("$cfg")
     else
@@ -45,18 +46,11 @@ for cfg in "${configs[@]}"; do
     prefix=$(python3 -c "import json; print(json.load(open('$cfg'))['prefix'])")
     title=$(python3  -c "import json; print(json.load(open('$cfg'))['title'])")
     echo "════════════════════════════════════════"
-    echo "  Topic : $title  ($prefix)"
-    echo "  Config: $cfg"
+    echo "  $title  ($prefix)"
     echo "════════════════════════════════════════"
-
     cp "$cfg" config.json
-
-    echo "→ Building dashboards${FETCH:+ (with fetch)}…"
-    python make_dashboard.py $FETCH
-
-    echo "→ Deploying…"
+    python make_dashboard.py "${ARGS[@]+"${ARGS[@]}"}"
     ./deploy.sh
-
     echo "✓ Done: $prefix"
     echo
 done

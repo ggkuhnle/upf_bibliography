@@ -398,7 +398,9 @@ def _load_aliases() -> dict:
 
     Returns a dict mapping each duplicate_id -> (canonical_id, canonical_name).
     """
-    for path in [os.path.join(os.path.dirname(__file__), "aliases.json"), "aliases.json"]:
+    _here = os.path.dirname(__file__)
+    for path in [os.path.join(_here, "config", "aliases.json"),
+                 os.path.join(_here, "aliases.json"), "aliases.json"]:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
