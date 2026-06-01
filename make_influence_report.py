@@ -2749,7 +2749,7 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
       </div>
       <div class="sec">
         <h3>Display</h3>
-        <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels" checked>
+        <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
           <span class="tog-slider"></span></label>Labels</div>
         <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-field">
           <span class="tog-slider"></span></label>Colour by field</div>
@@ -2804,12 +2804,12 @@ const cy = cytoscape({{
     {{ selector: 'node', style: {{
         'background-color': d => nodeColor(d.data()),
         'width':  'data(size)', 'height': 'data(size)',
-        'label':  'data(label)',
-        'font-size': 11,
-        'color': '#222', 'text-valign': 'bottom', 'text-halign': 'center',
+        'label':  '',
+        'font-size': 10,
+        'color': '#444', 'text-valign': 'bottom', 'text-halign': 'center',
         'text-margin-y': 3,
-        'text-background-color': '#ffffffcc', 'text-background-opacity': 1,
-        'text-background-padding': '2px',
+        'text-outline-color': '#fff', 'text-outline-width': 2,
+        'min-zoomed-font-size': 6,
         'shape': d => FOCAL_IDS.has(d.data('id')) ? 'star' : 'ellipse',
         'border-width': d => FOCAL_IDS.has(d.data('id')) ? 3 : 1,
         'border-color': d => FOCAL_IDS.has(d.data('id')) ? '#c0392b' : '#fff',
@@ -2830,18 +2830,21 @@ const cy = cytoscape({{
 }});
 
 // zoom-compensated font size
-function _labelFs() {{ return 11 / Math.max(0.05, cy.zoom()); }}
+function _labelFs() {{ return 10 / Math.max(0.05, cy.zoom()); }}
 function _updateLabelFs() {{
-  if (document.getElementById('tog-labels').checked) {{
+  if (document.getElementById('tog-labels').checked)
     cy.nodes().style('font-size', _labelFs());
-  }}
 }}
 cy.on('zoom', _updateLabelFs);
 
 // labels toggle
 document.getElementById('tog-labels').addEventListener('change', function() {{
-  if (this.checked) {{ cy.nodes().style('font-size', _labelFs()); cy.nodes().style('color', '#222'); }}
-  else {{ cy.nodes().style('font-size', 0); cy.nodes().style('color', 'transparent'); }}
+  if (this.checked) {{
+    cy.nodes().forEach(n => n.style('label', n.data('label') || ''));
+    cy.nodes().style('font-size', _labelFs());
+  }} else {{
+    cy.nodes().style('label', '');
+  }}
 }});
 
 // field colour toggle
@@ -2984,6 +2987,506 @@ document.getElementById('help-overlay').addEventListener('click', e => {{
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FUNDER INFLUENCE SECTION
+# Crawls OpenAlex live across all works funded by a given organisation.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FUNDER_INF_ROLE_COLOR = {
+    "funded_work":     "#EF553B",
+    "cites_funded":    "#AB63FA",
+    "cited_by_funded": "#00CC96",
+    "d2":              "#b0bec5",
+}
+
+
+def _fetch_funder_openalex(query: str) -> Optional[dict]:
+    """Search OpenAlex /funders by display name; return best match."""
+    time.sleep(REQUEST_DELAY)
+    data = _get("https://api.openalex.org/funders", {
+        "search":   query,
+        "per-page": 5,
+        "select":   "id,display_name,works_count,grants_count,description",
+    })
+    results = data.get("results") or []
+    if not results:
+        return None
+    best = results[0]
+    return {
+        "id":           best.get("id", ""),
+        "name":         best.get("display_name", query),
+        "works_count":  best.get("works_count", 0),
+        "grants_count": best.get("grants_count", 0),
+        "description":  (best.get("description") or "")[:120],
+    }
+
+
+def _fetch_funder_works_openalex(funder_id: str, con, limit: int = 50) -> list:
+    """Fetch top-cited works funded by this funder (cursor pagination)."""
+    short_id = funder_id.split("/")[-1]
+    works = []
+    cursor = "*"
+    while len(works) < limit:
+        page_limit = min(PAGE_SIZE, limit - len(works))
+        time.sleep(REQUEST_DELAY)
+        data = _get(BASE_URL, {
+            "filter":   f"grants.funder:{short_id}",
+            "sort":     "cited_by_count:desc",
+            "select":   _OA_SELECT_NOGRANTS,
+            "per-page": page_limit,
+            "cursor":   cursor,
+        })
+        results = data.get("results") or []
+        if not results:
+            break
+        for w in results:
+            meta = _extract_work(w)
+            _cache_put(con, meta["id"], meta)
+            works.append(meta)
+        cursor = (data.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return works
+
+
+def _write_funder_influence_html(funder_info: dict, focal_ids: set,
+                                  works: dict, edges: list, roles: dict,
+                                  output_path: str):
+    field_map = {}
+    for w in works.values():
+        f = w.get("field") or "Unknown"
+        if f not in field_map:
+            field_map[f] = _FIELD_COLORS[len(field_map) % len(_FIELD_COLORS)]
+
+    role_counts = {}
+    for r in roles.values():
+        role_counts[r] = role_counts.get(r, 0) + 1
+
+    all_funders_fnd: list = sorted({f for w in works.values()
+                                    for f in (w.get("funders") or []) if f})
+
+    nodes = []
+    for wid, w in works.items():
+        cit      = w.get("cit", 0) or 0
+        role     = roles.get(wid, "d2")
+        field    = w.get("field") or "Unknown"
+        is_focal = wid in focal_ids
+        size     = 20 if is_focal else max(5, min(16, 5 + 5 * math.log1p(cit)))
+        t        = w.get("title") or ""
+        label    = (t[:28] + "…") if len(t) > 28 else t
+        countries = w.get("countries") or []
+        country_str = (", ".join(countries[:3]) + ("…" if len(countries) > 3 else "")) if countries else "—"
+        funders  = w.get("funders") or []
+        funder_str = (", ".join(funders[:3]) + ("…" if len(funders) > 3 else "")) if funders else "—"
+        nodes.append({"data": {
+            "id":          wid,
+            "label":       label,
+            "title":       t,
+            "year":        w.get("year") or 0,
+            "cit":         cit,
+            "journal":     w.get("journal") or "",
+            "field":       field,
+            "countries":   country_str,
+            "funders":     funder_str,
+            "funder_list": funders,
+            "doi":         w.get("doi") or "",
+            "role":        role,
+            "is_focal":    is_focal,
+            "role_color":  FUNDER_INF_ROLE_COLOR.get(role, "#b0bec5"),
+            "field_color": field_map.get(field, "#b0bec5"),
+            "color":       FUNDER_INF_ROLE_COLOR.get(role, "#b0bec5"),
+            "size":        size,
+        }})
+
+    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
+                for s, t in edges]
+    elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
+    focal_ids_json    = json.dumps(list(focal_ids))
+    field_colors_json = json.dumps(field_map)
+    funders_json_fnd  = json.dumps(all_funders_fnd)
+
+    funder_name   = funder_info.get("name", "Funder")
+    works_count   = funder_info.get("works_count", 0)
+    grants_count  = funder_info.get("grants_count", 0)
+    description   = funder_info.get("description", "")
+
+    field_legend = "".join(
+        f'<div class="leg"><span class="leg-dot" style="background:{col}"></span>{fld}</div>'
+        for fld, col in sorted(field_map.items()))
+
+    n_focal   = role_counts.get("funded_work", 0)
+    n_citers  = role_counts.get("cites_funded", 0)
+    n_refs    = role_counts.get("cited_by_funded", 0)
+    n_d2      = role_counts.get("d2", 0)
+
+    all_years = sorted({w.get("year") or 0 for w in works.values() if w.get("year")})
+    year_min  = all_years[0]  if all_years else 1950
+    year_max  = all_years[-1] if all_years else 2025
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Funder influence — {funder_name}</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  font-size:13px;background:#f0f2f5;color:#222}}
+#app{{display:grid;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}}
+#topbar{{display:flex;align-items:center;gap:.6rem;padding:.5rem 1rem;
+  background:#1a1a2e;color:#eee;flex-wrap:wrap;z-index:10}}
+#topbar h1{{font-size:.95rem;font-weight:600;color:#fff;margin-right:.4rem}}
+.meta{{font-size:.75rem;color:#aaa;white-space:nowrap}}
+.hdr-link{{font-size:.75rem;color:#7ec8e3;text-decoration:none}}
+.hdr-link:hover{{text-decoration:underline}}
+#main{{display:grid;grid-template-columns:230px 1fr;overflow:hidden}}
+#sidebar{{background:#fff;border-right:1px solid #dde;overflow-y:auto;padding:.6rem;
+  display:flex;flex-direction:column;gap:.5rem}}
+#sidebar h3{{font-size:.72rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:#555;margin-bottom:.2rem}}
+.sec{{border-bottom:1px solid #eee;padding-bottom:.5rem}}
+.chip{{background:#f4f6fa;border-radius:6px;padding:.25rem .5rem;margin-bottom:.25rem;
+  display:flex;justify-content:space-between}}
+.cv{{font-weight:700;font-size:.9rem}}
+.cl{{font-size:.67rem;color:#777;margin-top:.05rem}}
+.tog-row{{display:flex;align-items:center;gap:.5rem;font-size:.78rem;margin-bottom:.2rem}}
+.tog{{position:relative;display:inline-block;width:32px;height:17px}}
+.tog input{{opacity:0;width:0;height:0}}
+.tog-slider{{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:17px;transition:.25s}}
+.tog-slider::before{{content:"";position:absolute;height:13px;width:13px;left:2px;bottom:2px;
+  background:#fff;border-radius:50%;transition:.25s}}
+.tog input:checked+.tog-slider{{background:#2980b9}}
+.tog input:checked+.tog-slider::before{{transform:translateX(15px)}}
+.badge{{font-size:.67rem;background:#e8ecf0;border-radius:8px;padding:.05rem .35rem;color:#555}}
+.primary{{background:#2980b9;color:#fff;border:none;border-radius:4px;padding:.3rem .6rem;
+  cursor:pointer;font-size:.78rem}}
+.primary:hover{{background:#1f6391}}
+.ctrl-row{{display:flex;align-items:center;gap:.4rem;margin-bottom:.2rem;font-size:.78rem}}
+.ctrl-row label{{color:#555;white-space:nowrap}}
+.ctrl-row select{{flex:1;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;border-radius:3px}}
+#detail{{flex:1;padding:.4rem;overflow-y:auto}}
+#detail h3{{font-size:.72rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:#555;margin-bottom:.3rem}}
+.hint{{color:#aaa;font-size:.78rem}}
+.d-row{{display:flex;justify-content:space-between;font-size:.78rem;
+  border-bottom:1px solid #f0f0f0;padding:.15rem 0}}
+.d-lbl{{color:#777}}
+.d-val{{font-weight:500;max-width:130px;text-align:right;word-break:break-word}}
+.d-doi{{color:#2980b9;text-decoration:none;font-size:.7rem}}
+.leg{{display:flex;align-items:center;gap:.35rem;font-size:.73rem;margin-bottom:.2rem}}
+.leg-dot{{width:10px;height:10px;border-radius:50%;flex-shrink:0}}
+#cy{{width:100%;height:100%}}
+.slider-wrap{{display:flex;align-items:center;gap:.5rem;font-size:.78rem}}
+.slider-wrap input{{flex:1}}
+/* help modal */
+#help-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;
+  justify-content:center;align-items:center}}
+#help-overlay.open{{display:flex}}
+#help-box{{background:#fff;border-radius:8px;max-width:560px;width:94%;max-height:88vh;
+  overflow-y:auto;padding:1.2rem 1.4rem;font-size:.82rem;line-height:1.55}}
+#help-box h2{{font-size:1rem;margin-bottom:.7rem;color:#1a1a2e}}
+#help-box h3{{font-size:.8rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.04em;color:#555;margin:.9rem 0 .3rem}}
+#help-box p{{margin-bottom:.5rem;color:#333}}
+#help-box table{{font-size:.78rem;margin-bottom:.5rem}}
+#help-box td{{padding:.12rem .4rem;vertical-align:top;border-bottom:1px solid #f0f0f0}}
+#help-box td:first-child{{font-weight:600;white-space:nowrap;color:#2980b9;padding-right:.7rem}}
+.help-btn{{background:transparent;border:1px solid #666;border-radius:50%;
+  width:22px;height:22px;color:#ccc;font-size:.82rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}}
+.help-btn:hover{{background:#333;color:#fff}}
+.close-btn{{float:right;background:transparent;border:none;font-size:1.1rem;
+  cursor:pointer;color:#888;line-height:1}}
+.close-btn:hover{{color:#222}}
+.fnd-row{{display:flex;gap:.3rem;margin-bottom:.25rem}}
+.fnd-row input{{flex:1;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;border-radius:3px}}
+.fnd-row button{{font-size:.72rem;padding:.15rem .4rem;border-radius:3px;
+  border:1px solid #ccc;background:#f4f6fa;cursor:pointer;white-space:nowrap}}
+.fnd-row button:hover{{background:#e0e6ec}}
+.fnd-select{{width:100%;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;
+  border-radius:3px;margin-bottom:.25rem}}
+</style>
+</head>
+<body>
+<div id="app">
+
+<div id="help-overlay">
+  <div id="help-box">
+    <button class="close-btn" id="help-close">✕</button>
+    <h2>Funder influence map — how to use</h2>
+    <h3>What this graph shows</h3>
+    <p>Each node is a published work; arrows point from citing → cited.
+    Node size reflects global citation count. Hexagonal nodes are the top-cited
+    works funded by <strong>{funder_name}</strong>:</p>
+    <table>
+      <tr><td style="color:#EF553B">⬡ Red hex</td><td>A funded work (top-cited, up to --max-works)</td></tr>
+      <tr><td style="color:#AB63FA">● Purple</td><td>Papers that cite any funded work</td></tr>
+      <tr><td style="color:#00CC96">● Teal</td><td>Papers cited by any funded work (references)</td></tr>
+      <tr><td style="color:#b0bec5">● Grey</td><td>Second-hop neighbours</td></tr>
+    </table>
+    <p>Note: only the top-cited funded papers are included, not all funded works.</p>
+    <h3>Navigation</h3>
+    <table>
+      <tr><td>Scroll / pinch</td><td>Zoom</td></tr>
+      <tr><td>Drag background</td><td>Pan</td></tr>
+      <tr><td>Click node</td><td>Show details</td></tr>
+      <tr><td>Double-click node</td><td>Highlight neighbours; click background to clear</td></tr>
+    </table>
+    <h3>Controls</h3>
+    <table>
+      <tr><td>Labels</td><td>Toggle title snippets on nodes</td></tr>
+      <tr><td>Colour by field</td><td>Recolour by research field</td></tr>
+      <tr><td>Year filter</td><td>Hide works outside the year range; funded papers always shown</td></tr>
+      <tr><td>Co-funder</td><td>Highlight nodes that share another funder</td></tr>
+      <tr><td>Re-layout</td><td>Re-run the chosen layout algorithm</td></tr>
+    </table>
+    <h3>Data source</h3>
+    <p>Data fetched live from <a href="https://openalex.org" target="_blank">OpenAlex</a>,
+    cached in <code>cache/influence_cache.sqlite</code>.
+    Only works where OpenAlex records the grant are included — coverage is incomplete.</p>
+  </div>
+</div>
+
+<div id="topbar">
+  <h1>Funder influence — {funder_name}</h1>
+  <span class="meta">{works_count:,} total funded works (OA)</span>
+  <span class="meta">{n_focal} shown</span>
+  {f'<span class="meta">{description}</span>' if description else ''}
+  <span style="flex:1"></span>
+  <span class="meta">{len(works):,} nodes · {len(edges):,} edges</span>
+  <button class="help-btn" id="help-open" title="How to use">?</button>
+</div>
+
+<div id="main">
+  <div id="sidebar">
+    <div class="sec">
+      <h3>Funder stats</h3>
+      <div class="chip"><div><div class="cv">{n_focal}</div><div class="cl">funded papers shown</div></div></div>
+      <div class="chip"><div><div class="cv">{works_count:,}</div><div class="cl">total funded works (OA)</div></div></div>
+      <div class="chip"><div><div class="cv">{n_citers}</div><div class="cl">papers citing funded works</div></div></div>
+      <div class="chip"><div><div class="cv">{n_refs}</div><div class="cl">papers cited by funded works</div></div></div>
+    </div>
+    <div class="sec">
+      <h3>Role colours</h3>
+      <div class="leg"><span class="leg-dot" style="background:#EF553B"></span>Funded work (hexagon)</div>
+      <div class="leg"><span class="leg-dot" style="background:#AB63FA"></span>Cites funded work</div>
+      <div class="leg"><span class="leg-dot" style="background:#00CC96"></span>Cited by funded work</div>
+      <div class="leg"><span class="leg-dot" style="background:#b0bec5"></span>Depth-2</div>
+    </div>
+    <div class="sec">
+      <h3>Year filter</h3>
+      <div class="slider-wrap">
+        <span id="yr-lo-lbl">{year_min}</span>
+        <input type="range" id="yr-lo" min="{year_min}" max="{year_max}" value="{year_min}" style="flex:1">
+      </div>
+      <div class="slider-wrap">
+        <span id="yr-hi-lbl">{year_max}</span>
+        <input type="range" id="yr-hi" min="{year_min}" max="{year_max}" value="{year_max}" style="flex:1">
+      </div>
+      <button class="primary" id="btn-yr-reset" style="margin-top:.3rem;width:100%">Reset years</button>
+    </div>
+    <div class="sec">
+      <h3>Co-funder highlight</h3>
+      <select class="fnd-select" id="funder-sel"><option value="">— select co-funder —</option></select>
+      <div class="fnd-row">
+        <input type="text" id="funder-search" placeholder="or type to filter…">
+        <button id="funder-clear">Clear</button>
+      </div>
+      <div id="funder-count" style="font-size:.7rem;color:#777"></div>
+    </div>
+    <div class="sec">
+      <h3>Display</h3>
+      <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
+        <span class="tog-slider"></span></label>Labels</div>
+      <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-field">
+        <span class="tog-slider"></span></label>Colour by field</div>
+      <div class="ctrl-row"><label>Layout</label>
+        <select id="sel-layout">
+          <option value="cose">CoSE (default)</option>
+          <option value="circle">Circle</option>
+          <option value="concentric">Concentric</option>
+          <option value="grid">Grid</option>
+        </select>
+      </div>
+      <button class="primary" id="btn-relayout" style="margin-top:.3rem;width:100%">Re-layout</button>
+      <button class="primary" id="btn-reset" style="margin-top:.3rem;width:100%">Reset view</button>
+    </div>
+    <div class="sec">
+      <h3>Field legend</h3>
+      <div id="field-legend">{field_legend}</div>
+    </div>
+    <div id="detail">
+      <h3>Selected node</h3>
+      <p class="hint">Click a node to see details</p>
+    </div>
+  </div>
+  <div id="cy"></div>
+</div>
+</div>
+<script>
+const ELEMENTS     = {elements_json};
+const FOCAL_IDS    = new Set({focal_ids_json});
+const FIELD_COLORS = {field_colors_json};
+const ALL_FUNDERS  = {funders_json_fnd};
+const ROLE_COLOR   = {{
+  funded_work:     "#EF553B",
+  cites_funded:    "#AB63FA",
+  cited_by_funded: "#00CC96",
+  d2:              "#b0bec5",
+}};
+const YEAR_MIN = {year_min};
+const YEAR_MAX = {year_max};
+
+let useField = false;
+let yearLo = YEAR_MIN, yearHi = YEAR_MAX;
+
+function nodeColor(d) {{
+  return useField ? (FIELD_COLORS[d.field] || "#b0bec5") : (ROLE_COLOR[d.role] || "#b0bec5");
+}}
+
+const cy = cytoscape({{
+  container: document.getElementById('cy'),
+  elements: ELEMENTS,
+  style: [
+    {{ selector: 'node', style: {{
+        'background-color': d => nodeColor(d.data()),
+        'width': 'data(size)', 'height': 'data(size)',
+        'label': '',
+        'font-size': 10,
+        'color': '#444', 'text-valign': 'bottom', 'text-halign': 'center',
+        'text-margin-y': 3,
+        'text-outline-color': '#fff', 'text-outline-width': 2,
+        'min-zoomed-font-size': 6,
+        'shape': d => FOCAL_IDS.has(d.data('id')) ? 'hexagon' : 'ellipse',
+        'border-width': d => FOCAL_IDS.has(d.data('id')) ? 3 : 1,
+        'border-color': d => FOCAL_IDS.has(d.data('id')) ? '#c0392b' : '#fff',
+    }}}},
+    {{ selector: 'edge', style: {{
+        'width': 1, 'line-color': '#ccc',
+        'target-arrow-color': '#aaa', 'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier', 'opacity': 0.5,
+    }}}},
+    {{ selector: 'node:selected', style: {{ 'border-width': 3, 'border-color': '#2980b9' }} }},
+    {{ selector: '.dimmed', style: {{ 'opacity': 0.1 }} }},
+    {{ selector: '.highlighted', style: {{ 'opacity': 1 }} }},
+  ],
+  layout: {{ name: 'cose', animate: false, nodeRepulsion: 6000, idealEdgeLength: 80 }},
+  minZoom: 0.05, maxZoom: 10,
+}});
+
+function _labelFs() {{ return 10 / Math.max(0.05, cy.zoom()); }}
+cy.on('zoom', () => {{ if (document.getElementById('tog-labels').checked) cy.nodes().style('font-size', _labelFs()); }});
+
+document.getElementById('tog-labels').addEventListener('change', function() {{
+  if (this.checked) {{ cy.nodes().forEach(n => n.style('label', n.data('label') || '')); cy.nodes().style('font-size', _labelFs()); }}
+  else {{ cy.nodes().style('label', ''); }}
+}});
+document.getElementById('tog-field').addEventListener('change', function() {{
+  useField = this.checked;
+  cy.nodes().forEach(n => n.style('background-color', nodeColor(n.data())));
+}});
+
+function applyYearFilter() {{
+  cy.nodes().forEach(n => {{
+    const visible = FOCAL_IDS.has(n.id()) || (() => {{ const y = n.data('year')||0; return y >= yearLo && y <= yearHi; }})();
+    n.style('display', visible ? 'element' : 'none');
+  }});
+  cy.edges().forEach(e => {{
+    e.style('display',
+      cy.getElementById(e.data('source')).style('display') !== 'none' &&
+      cy.getElementById(e.data('target')).style('display') !== 'none' ? 'element' : 'none');
+  }});
+}}
+document.getElementById('yr-lo').addEventListener('input', function() {{
+  yearLo = +this.value; document.getElementById('yr-lo-lbl').textContent = yearLo;
+  if (yearLo > yearHi) {{ yearHi = yearLo; document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi; }}
+  applyYearFilter();
+}});
+document.getElementById('yr-hi').addEventListener('input', function() {{
+  yearHi = +this.value; document.getElementById('yr-hi-lbl').textContent = yearHi;
+  if (yearHi < yearLo) {{ yearLo = yearHi; document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo; }}
+  applyYearFilter();
+}});
+document.getElementById('btn-yr-reset').addEventListener('click', function() {{
+  yearLo = YEAR_MIN; yearHi = YEAR_MAX;
+  document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo;
+  document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi;
+  applyYearFilter();
+}});
+
+cy.on('tap', 'node', function(e) {{
+  const d = e.target.data();
+  const doi_link = d.doi ? `<a class="d-doi" href="https://doi.org/${{d.doi}}" target="_blank">DOI ↗</a>` : '—';
+  const focal_badge = FOCAL_IDS.has(d.id) ? ' <span class="badge">funded work</span>' : '';
+  document.getElementById('detail').innerHTML = `
+    <h3>Selected node</h3>
+    <div class="d-row"><span class="d-lbl">Title</span><span class="d-val">${{d.title.slice(0,120)}}${{focal_badge}}</span></div>
+    <div class="d-row"><span class="d-lbl">Year</span><span class="d-val">${{d.year||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Citations</span><span class="d-val">${{d.cit}}</span></div>
+    <div class="d-row"><span class="d-lbl">Journal</span><span class="d-val">${{d.journal.slice(0,40)||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Field</span><span class="d-val">${{d.field.slice(0,30)||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Countries</span><span class="d-val">${{d.countries}}</span></div>
+    <div class="d-row"><span class="d-lbl">Role</span><span class="d-val">${{d.role}}</span></div>
+    <div class="d-row"><span class="d-lbl">DOI</span><span class="d-val">${{doi_link}}</span></div>`;
+}});
+cy.on('dblclick', 'node', e => {{
+  cy.elements().addClass('dimmed');
+  e.target.closedNeighborhood().removeClass('dimmed').addClass('highlighted');
+}});
+cy.on('tap', e => {{ if (e.target === cy) cy.elements().removeClass('dimmed highlighted'); }});
+
+function runLayout(name) {{
+  const opts = {{ name, animate: false }};
+  if (name === 'cose') {{ opts.nodeRepulsion = 6000; opts.idealEdgeLength = 80; }}
+  if (name === 'concentric') {{ opts.concentric = n => FOCAL_IDS.has(n.id()) ? 10 : n.data('cit'); opts.levelWidth = () => 3; }}
+  cy.layout(opts).run();
+}}
+document.getElementById('btn-relayout').addEventListener('click', () => runLayout(document.getElementById('sel-layout').value));
+document.getElementById('btn-reset').addEventListener('click', () => cy.fit(30));
+document.getElementById('sel-layout').addEventListener('change', function() {{ runLayout(this.value); }});
+
+(function initFunders() {{
+  const sel = document.getElementById('funder-sel');
+  const inp = document.getElementById('funder-search');
+  const cnt = document.getElementById('funder-count');
+  ALL_FUNDERS.forEach(f => {{ const o = document.createElement('option'); o.value = o.textContent = f; sel.appendChild(o); }});
+  function applyFunder(q) {{
+    if (!q) {{
+      cy.nodes().forEach(n => {{
+        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
+        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
+      }}); cnt.textContent = ''; return;
+    }}
+    const ql = q.toLowerCase(); let hits = 0;
+    cy.nodes().forEach(n => {{
+      const match = (n.data('funder_list') || []).some(f => f.toLowerCase().includes(ql));
+      n.style('border-width', match ? 4 : (FOCAL_IDS.has(n.id()) ? 3 : 1));
+      n.style('border-color', match ? '#f39c12' : (FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff'));
+      if (match) hits++;
+    }});
+    cnt.textContent = hits ? `${{hits}} match${{hits===1?'':'es'}}` : 'No matches';
+  }}
+  sel.addEventListener('change', () => {{ inp.value = sel.value; applyFunder(sel.value); }});
+  inp.addEventListener('input', () => {{ sel.value = ''; applyFunder(inp.value.trim()); }});
+  document.getElementById('funder-clear').addEventListener('click', () => {{ sel.value=''; inp.value=''; applyFunder(''); }});
+}})();
+
+document.getElementById('help-open').addEventListener('click', () => document.getElementById('help-overlay').classList.add('open'));
+document.getElementById('help-close').addEventListener('click', () => document.getElementById('help-overlay').classList.remove('open'));
+document.getElementById('help-overlay').addEventListener('click', e => {{
+  if (e.target === document.getElementById('help-overlay')) document.getElementById('help-overlay').classList.remove('open');
+}});
+</script>
+</body>
+</html>"""
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print(f"  Written: {output_path}  ({os.path.getsize(output_path)//1024} KB)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2997,15 +3500,18 @@ def main():
     cfg = _load_cfg(_hint)
 
     ap = argparse.ArgumentParser(
-        description="Influence report: paper or author — corpus network + global OpenAlex crawl")
+        description="Influence report: paper, author, or funder — corpus + global OpenAlex crawl")
     grp = ap.add_mutually_exclusive_group(required=True)
-    grp.add_argument("--paper",     help="Title substring to search in corpus (paper mode)")
-    grp.add_argument("--doi",       help="Paper DOI (paper mode)")
-    grp.add_argument("--paper-id",  dest="paper_id",
+    grp.add_argument("--paper",      help="Title substring to search in corpus (paper mode)")
+    grp.add_argument("--doi",        help="Paper DOI (paper mode)")
+    grp.add_argument("--paper-id",   dest="paper_id",
                      help="OpenAlex work URL (paper mode)")
-    grp.add_argument("--author",    help="Author name to search (author mode)")
-    grp.add_argument("--author-id", dest="author_id",
+    grp.add_argument("--author",     help="Author name to search (author mode)")
+    grp.add_argument("--author-id",  dest="author_id",
                      help="OpenAlex author URL, e.g. https://openalex.org/A1234 (author mode)")
+    grp.add_argument("--funder",     help="Funder name to search, e.g. 'Wellcome Trust' (funder mode)")
+    grp.add_argument("--funder-id",  dest="funder_id",
+                     help="OpenAlex funder URL, e.g. https://openalex.org/F126220448 (funder mode)")
 
     # Shared / corpus options
     ap.add_argument("--data-dir",    default=None,
@@ -3027,6 +3533,8 @@ def main():
     ap.add_argument("--max-cites",    type=int, default=DEFAULT_MAX_CITES)
     ap.add_argument("--max-works",    type=int, default=200,
                     help="Max author works to fetch from OpenAlex (author mode)")
+    ap.add_argument("--max-funded",   type=int, default=50,
+                    help="Max funded works to fetch from OpenAlex (funder mode)")
     ap.add_argument("--cache",        default=CACHE_FILE)
     ap.add_argument("--no-influence", action="store_true",
                     help="Skip global influence map")
@@ -3037,6 +3545,7 @@ def main():
     args = ap.parse_args()
 
     author_mode = bool(args.author or args.author_id)
+    funder_mode = bool(args.funder or args.funder_id)
 
     cfg_prefix = cfg.get("prefix", "")
     data_dir   = (args.data_dir or
@@ -3135,6 +3644,72 @@ def main():
             print("  author_corpus.html   — author position in field corpus")
         if not args.no_influence:
             print("  author_influence.html — global author influence (OpenAlex crawl)")
+        return
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # FUNDER MODE
+    # ══════════════════════════════════════════════════════════════════════════
+    if funder_mode:
+        funder_query = args.funder or args.funder_id
+        slug = re.sub(r"[^a-z0-9]+", "_", funder_query[:40].lower()).strip("_")
+        out_dir = args.output_dir or os.path.join("reports", out_prefix, "funders", slug)
+        os.makedirs(out_dir, exist_ok=True)
+
+        con = _open_cache(args.cache)
+        funder_info = None
+
+        if args.funder_id:
+            short = args.funder_id.split("/")[-1]
+            print(f"\nFetching funder from OpenAlex: {args.funder_id} …")
+            time.sleep(REQUEST_DELAY)
+            raw = _get(f"https://api.openalex.org/funders/{short}", {
+                "select": "id,display_name,works_count,grants_count,description"})
+            if raw.get("id"):
+                funder_info = {
+                    "id":           raw["id"],
+                    "name":         raw.get("display_name", short),
+                    "works_count":  raw.get("works_count", 0),
+                    "grants_count": raw.get("grants_count", 0),
+                    "description":  (raw.get("description") or "")[:120],
+                }
+        else:
+            print(f"\nSearching OpenAlex for funder: {args.funder} …")
+            funder_info = _fetch_funder_openalex(args.funder)
+
+        if not funder_info:
+            print("  Funder not found in OpenAlex.")
+            con.close()
+            return
+
+        print(f"  {funder_info['name']}  "
+              f"({funder_info['works_count']:,} funded works in OA)")
+        print(f"Fetching top-cited funded works (limit={args.max_funded}) …")
+        focal_works = _fetch_funder_works_openalex(
+            funder_info["id"], con, limit=args.max_funded)
+        print(f"  {len(focal_works)} works fetched")
+
+        if not focal_works:
+            print("  No works found — skipping funder influence map.")
+        else:
+            focal_ids_set = {w["id"] for w in focal_works}
+            print(f"Crawling funder influence (depth={args.depth}) …")
+            fw, fe, fr = _crawl_author(
+                focal_works, args.depth, args.max_refs, args.max_cites, con)
+            # rename roles to funder-specific labels
+            role_map = {"author_paper": "funded_work", "cites_author": "cites_funded",
+                        "cited_by_author": "cited_by_funded"}
+            fr = {wid: role_map.get(r, r) for wid, r in fr.items()}
+            print(f"  {len(fw)} works, {len(fe)} edges before trim")
+            fw, fe, fr = _trim_author_graph(focal_ids_set, fw, fe, args.max_nodes, fr)
+            print(f"  {len(fw)} works, {len(fe)} edges after trim")
+            print("Writing funder influence map …")
+            _write_funder_influence_html(
+                funder_info, focal_ids_set, fw, fe, fr,
+                os.path.join(out_dir, "funder_influence.html"))
+        con.close()
+
+        print(f"\nOutput: {out_dir}/")
+        print("  funder_influence.html — global funder influence (OpenAlex crawl)")
         return
 
     # ══════════════════════════════════════════════════════════════════════════
