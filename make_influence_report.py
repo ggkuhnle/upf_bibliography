@@ -1592,7 +1592,9 @@ def _fetch_citers(work_id, con, limit):
         cursor = (data.get("meta") or {}).get("next_cursor")
         if not cursor:
             break
-    _cache_edges_put(con, work_id, [c["id"] for c in citers])
+    # Store as (citer → focal) so the "in" lookup (cited_id=work_id) finds them
+    for c in citers:
+        _cache_edges_put(con, c["id"], [work_id])
     return citers
 
 
@@ -2364,7 +2366,7 @@ def _fetch_author_works_openalex(author_id: str, con, limit: int = 500) -> list:
 
 
 def _crawl_author(focal_works: list, depth: int, max_refs: int,
-                  max_cites_per_paper: int, con) -> tuple:
+                  max_cites_per_paper: int, con, d2_seeds: int = 15) -> tuple:
     """
     Crawl citation neighbourhood around all author papers.
     Returns (works, edges, roles) where roles are:
@@ -2407,28 +2409,15 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
         # Layer 2 forward: top citers of the top-cited d1 citers
         d1_citers = [works[wid] for wid in roles
                      if roles[wid] == "cites_author" and wid in works]
-        top_seeds = sorted(d1_citers, key=lambda w: w.get("cit", 0), reverse=True)[:15]
-        print(f"  layer 2 forward — {len(top_seeds)} seeds × up to 15 citers …")
+        top_seeds = sorted(d1_citers, key=lambda w: w.get("cit", 0), reverse=True)[:d2_seeds]
+        print(f"  layer 2 forward — {len(top_seeds)} seeds × up to {d2_seeds} citers …")
         for seed in top_seeds:
-            for w in _fetch_citers(seed["id"], con, 15):
+            for w in _fetch_citers(seed["id"], con, d2_seeds):
                 if w["id"] not in works:
                     works[w["id"]] = w
                     roles.setdefault(w["id"], "d2")
                 edges_set.add((w["id"], seed["id"]))
 
-        # Layer 2 backward: refs of d1 refs
-        d1_refs = [works[wid] for wid in roles
-                   if roles[wid] == "cited_by_author" and wid in works]
-        print(f"  layer 2 backward — scanning refs of {len(d1_refs)} layer-1B nodes …")
-        for seed in d1_refs:
-            for rid in (seed.get("ref_ids") or [])[:max_refs]:
-                if rid not in works and rid not in focal_ids:
-                    w = _fetch_work(rid, con)
-                    if w:
-                        works[rid] = w
-                        roles.setdefault(rid, "d2")
-                if rid in works:
-                    edges_set.add((seed["id"], rid))
 
     # Cross-edges within known works
     all_ids = set(works.keys())
@@ -2445,31 +2434,34 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
 
 def _trim_author_graph(focal_ids: set, works: dict, edges: list,
                        max_nodes: int, roles: dict) -> tuple:
-    """Keep all focal nodes + top neighbours by citation count."""
+    """Keep all focal nodes + neighbours, budgeting by role so citers are not
+    crowded out by highly-cited references."""
     keep = set(focal_ids) & set(works.keys())
+    budget = max(0, max_nodes - len(keep))
 
-    # Collect direct neighbours
-    d1_neighbours = set()
-    for src, tgt in edges:
-        if src in focal_ids: d1_neighbours.add(tgt)
-        elif tgt in focal_ids: d1_neighbours.add(src)
+    def _top(wid_set, n):
+        return sorted(wid_set & works.keys(),
+                      key=lambda wid: works[wid].get("cit", 0), reverse=True)[:n]
 
-    budget = max_nodes - len(keep)
-    d1_sorted = sorted([works[wid] for wid in d1_neighbours if wid in works],
-                       key=lambda w: w.get("cit", 0), reverse=True)
-    for w in d1_sorted[:budget]:
-        keep.add(w["id"])
+    # Classify non-focal d1 neighbours by role
+    citers  = {wid for wid, r in roles.items() if r == "cites_author"    and wid in works}
+    refs    = {wid for wid, r in roles.items() if r == "cited_by_author" and wid in works}
+    d2_all  = {wid for wid, r in roles.items() if r == "d2"              and wid in works}
 
-    # Fill remaining budget with d2
-    if len(keep) < max_nodes:
-        adj2 = set()
-        for src, tgt in edges:
-            if src in keep and tgt not in keep: adj2.add(tgt)
-            elif tgt in keep and src not in keep: adj2.add(src)
-        remaining = max_nodes - len(keep)
-        for w in sorted([works[wid] for wid in adj2 if wid in works],
-                        key=lambda w: w.get("cit", 0), reverse=True)[:remaining]:
-            keep.add(w["id"])
+    # Give each role a proportional share; citers and refs share equally first,
+    # any leftover goes to d2 then back to whichever still has candidates.
+    share = budget // 3
+    leftover = budget - share * 3
+
+    keep.update(_top(citers, share + leftover))
+    keep.update(_top(refs   - keep, share))
+    keep.update(_top(d2_all - keep, share))
+
+    # Fill any remaining slots with whatever is left (highest citation first)
+    remaining = max_nodes - len(keep)
+    if remaining > 0:
+        rest = (citers | refs | d2_all) - keep
+        keep.update(_top(rest, remaining))
 
     trimmed_edges = [(s, t) for s, t in edges if s in keep and t in keep]
     connected = {n for e in trimmed_edges for n in e} | focal_ids
@@ -2718,11 +2710,29 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
           <div class="cl">papers cited by author</div></div></div>
       </div>
       <div class="sec">
-        <h3>Role colours</h3>
-        <div class="leg"><span class="leg-dot" style="background:#EF553B"></span>Author paper (star)</div>
-        <div class="leg"><span class="leg-dot" style="background:#AB63FA"></span>Cites author</div>
-        <div class="leg"><span class="leg-dot" style="background:#00CC96"></span>Cited by author</div>
-        <div class="leg"><span class="leg-dot" style="background:#b0bec5"></span>Depth-2</div>
+        <h3>Layers</h3>
+        <div class="tog-row">
+          <label class="tog"><input type="checkbox" id="show-cites-author" checked>
+            <span class="tog-slider" style="background:#AB63FA"></span></label>
+          <span class="leg-dot" style="background:#AB63FA"></span>
+          Citing author&nbsp;<span class="badge">{n_citers}</span>
+        </div>
+        <div class="tog-row">
+          <label class="tog"><input type="checkbox" id="show-cited-author" checked>
+            <span class="tog-slider" style="background:#00CC96"></span></label>
+          <span class="leg-dot" style="background:#00CC96"></span>
+          Cited by author&nbsp;<span class="badge">{n_refs}</span>
+        </div>
+        <div class="tog-row">
+          <label class="tog"><input type="checkbox" id="show-d2" checked>
+            <span class="tog-slider" style="background:#b0bec5"></span></label>
+          <span class="leg-dot" style="background:#b0bec5"></span>
+          Depth-2&nbsp;<span class="badge">{n_d2}</span>
+        </div>
+      </div>
+      <div id="detail" class="sec">
+        <h3>Selected node</h3>
+        <p class="hint">Click a node to see details</p>
       </div>
       <div class="sec">
         <h3>Year filter</h3>
@@ -2764,13 +2774,9 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
         <button class="primary" id="btn-relayout" style="margin-top:.3rem;width:100%">Re-layout</button>
         <button class="primary" id="btn-reset" style="margin-top:.3rem;width:100%">Reset view</button>
       </div>
-      <div class="sec">
+      <div class="sec" id="field-legend-sec" style="display:none">
         <h3>Field legend</h3>
         <div id="field-legend">{field_legend}</div>
-      </div>
-      <div id="detail">
-        <h3>Selected node</h3>
-        <p class="hint">Click a node to see details</p>
       </div>
     </div>
     <div id="cy"></div>
@@ -2792,6 +2798,7 @@ const YEAR_MAX = {year_max};
 
 let useField = false;
 let yearLo = YEAR_MIN, yearHi = YEAR_MAX;
+let _visRoles = {{ cites_author: true, cited_by_author: true, d2: true }};
 
 function nodeColor(d) {{
   return useField ? (FIELD_COLORS[d.field] || "#b0bec5") : (ROLE_COLOR[d.role] || "#b0bec5");
@@ -2847,19 +2854,39 @@ document.getElementById('tog-labels').addEventListener('change', function() {{
   }}
 }});
 
-// field colour toggle
+// field colour toggle — also shows/hides field legend
 document.getElementById('tog-field').addEventListener('change', function() {{
   useField = this.checked;
   cy.nodes().forEach(n => n.style('background-color', nodeColor(n.data())));
+  document.getElementById('field-legend-sec').style.display = useField ? '' : 'none';
 }});
 
-// year filter
-function applyYearFilter() {{
+// hover labels
+cy.on('mouseover', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked)
+    e.target.style('label', e.target.data('label') || '');
+}});
+cy.on('mouseout', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked)
+    e.target.style('label', '');
+}});
+
+// layer toggles
+[['show-cites-author','cites_author'],['show-cited-author','cited_by_author'],['show-d2','d2']].forEach(([id, role]) => {{
+  document.getElementById(id).addEventListener('change', function() {{
+    _visRoles[role] = this.checked; applyFilters();
+  }});
+}});
+
+// combined year + role filter
+function applyFilters() {{
   cy.nodes().forEach(n => {{
     const y = n.data('year') || 0;
     const focal = FOCAL_IDS.has(n.id());
-    const visible = focal || (y >= yearLo && y <= yearHi);
-    n.style('display', visible ? 'element' : 'none');
+    const role = n.data('role') || '';
+    const yearOk = focal || (y >= yearLo && y <= yearHi);
+    const roleOk = focal || _visRoles[role] !== false;
+    n.style('display', yearOk && roleOk ? 'element' : 'none');
   }});
   cy.edges().forEach(e => {{
     const src = cy.getElementById(e.data('source'));
@@ -2871,21 +2898,21 @@ function applyYearFilter() {{
 document.getElementById('yr-lo').addEventListener('input', function() {{
   yearLo = +this.value; document.getElementById('yr-lo-lbl').textContent = yearLo;
   if (yearLo > yearHi) {{ yearHi = yearLo; document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi; }}
-  applyYearFilter();
+  applyFilters();
 }});
 document.getElementById('yr-hi').addEventListener('input', function() {{
   yearHi = +this.value; document.getElementById('yr-hi-lbl').textContent = yearHi;
   if (yearHi < yearLo) {{ yearLo = yearHi; document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo; }}
-  applyYearFilter();
+  applyFilters();
 }});
 document.getElementById('btn-yr-reset').addEventListener('click', function() {{
   yearLo = YEAR_MIN; yearHi = YEAR_MAX;
   document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo;
   document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi;
-  applyYearFilter();
+  applyFilters();
 }});
 
-// node click → detail panel
+// node click → detail panel + neighbourhood highlight
 cy.on('tap', 'node', function(e) {{
   const d = e.target.data();
   const doi_link = d.doi ? `<a class="d-doi" href="https://doi.org/${{d.doi}}" target="_blank">DOI ↗</a>` : '—';
@@ -2902,15 +2929,17 @@ cy.on('tap', 'node', function(e) {{
     <div class="d-row"><span class="d-lbl">Role</span><span class="d-val">${{d.role}}</span></div>
     <div class="d-row"><span class="d-lbl">DOI</span><span class="d-val">${{doi_link}}</span></div>
   `;
+  cy.elements().addClass('dimmed');
+  e.target.closedNeighborhood().removeClass('dimmed');
 }});
 
-// neighbour highlight on double-click
-cy.on('dblclick', 'node', function(e) {{
-  cy.elements().addClass('dimmed');
-  e.target.closedNeighborhood().removeClass('dimmed').addClass('highlighted');
-}});
+// click background → restore all
 cy.on('tap', function(e) {{
-  if (e.target === cy) cy.elements().removeClass('dimmed highlighted');
+  if (e.target === cy) {{
+    cy.elements().removeClass('dimmed');
+    document.getElementById('detail').innerHTML =
+      '<h3>Selected node</h3><p class="hint">Click a node to see details</p>';
+  }}
 }});
 
 // layout
@@ -3386,6 +3415,16 @@ document.getElementById('tog-field').addEventListener('change', function() {{
   cy.nodes().forEach(n => n.style('background-color', nodeColor(n.data())));
 }});
 
+// hover labels
+cy.on('mouseover', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked)
+    e.target.style('label', e.target.data('label') || '');
+}});
+cy.on('mouseout', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked)
+    e.target.style('label', '');
+}});
+
 function applyYearFilter() {{
   cy.nodes().forEach(n => {{
     const visible = FOCAL_IDS.has(n.id()) || (() => {{ const y = n.data('year')||0; return y >= yearLo && y <= yearHi; }})();
@@ -3428,12 +3467,16 @@ cy.on('tap', 'node', function(e) {{
     <div class="d-row"><span class="d-lbl">Countries</span><span class="d-val">${{d.countries}}</span></div>
     <div class="d-row"><span class="d-lbl">Role</span><span class="d-val">${{d.role}}</span></div>
     <div class="d-row"><span class="d-lbl">DOI</span><span class="d-val">${{doi_link}}</span></div>`;
-}});
-cy.on('dblclick', 'node', e => {{
   cy.elements().addClass('dimmed');
-  e.target.closedNeighborhood().removeClass('dimmed').addClass('highlighted');
+  e.target.closedNeighborhood().removeClass('dimmed');
 }});
-cy.on('tap', e => {{ if (e.target === cy) cy.elements().removeClass('dimmed highlighted'); }});
+cy.on('tap', e => {{
+  if (e.target === cy) {{
+    cy.elements().removeClass('dimmed');
+    document.getElementById('detail').innerHTML =
+      '<h3>Selected node</h3><p class="hint">Click a node to see details</p>';
+  }}
+}});
 
 function runLayout(name) {{
   const opts = {{ name, animate: false }};
@@ -3533,6 +3576,8 @@ def main():
     ap.add_argument("--max-cites",    type=int, default=DEFAULT_MAX_CITES)
     ap.add_argument("--max-works",    type=int, default=200,
                     help="Max author works to fetch from OpenAlex (author mode)")
+    ap.add_argument("--d2-seeds",     type=int, default=15,
+                    help="Number of top-cited layer-1 nodes used as seeds for layer-2 crawl (default 15)")
     ap.add_argument("--max-funded",   type=int, default=50,
                     help="Max funded works to fetch from OpenAlex (funder mode)")
     ap.add_argument("--cache",        default=CACHE_FILE)
@@ -3559,15 +3604,17 @@ def main():
     if author_mode:
         author_query = args.author or args.author_id
         slug = re.sub(r"[^a-z0-9]+", "_", author_query[:40].lower()).strip("_")
-        out_dir = args.output_dir or os.path.join("reports", out_prefix, "authors", slug)
+        out_dir = args.output_dir or os.path.join("reports", "authors", slug)
         os.makedirs(out_dir, exist_ok=True)
 
         # ── Author corpus ─────────────────────────────────────────────────────
+        corpus_written = False
         if not args.no_corpus:
             print(f"Loading corpus data from {data_dir} …")
             adata = _load_author_corpus_data(data_dir)
             if adata["papers"] is None:
                 print("  papers_detail.csv not found — skipping author corpus.")
+                print(f"  Tip: check available data dirs with: ls data/")
             else:
                 author_id_c, author_name_c, author_row_c = find_author_in_corpus(
                     author_query, adata)
@@ -3586,6 +3633,7 @@ def main():
                         _write_author_corpus_html(
                             author_name_c, author_row_c, an, ae, asi,
                             os.path.join(out_dir, "author_corpus.html"))
+                        corpus_written = True
 
         # ── Author global influence ───────────────────────────────────────────
         if not args.no_influence:
@@ -3628,11 +3676,9 @@ def main():
                     focal_ids_set = {w["id"] for w in focal_works}
                     print(f"Crawling author influence (depth={args.depth}) …")
                     aw, ae, ar = _crawl_author(
-                        focal_works, args.depth, args.max_refs, args.max_cites, con)
-                    print(f"  {len(aw)} works, {len(ae)} edges before trim")
-                    aw, ae, ar = _trim_author_graph(
-                        focal_ids_set, aw, ae, args.max_nodes, ar)
-                    print(f"  {len(aw)} works, {len(ae)} edges after trim")
+                        focal_works, args.depth, args.max_refs, args.max_cites, con,
+                        d2_seeds=args.d2_seeds)
+                    print(f"  {len(aw)} works, {len(ae)} edges")
                     print("Writing author influence map …")
                     _write_author_influence_html(
                         author_info, focal_ids_set, aw, ae, ar,
@@ -3640,8 +3686,8 @@ def main():
             con.close()
 
         print(f"\nOutput: {out_dir}/")
-        if not args.no_corpus:
-            print("  author_corpus.html   — author position in field corpus")
+        if corpus_written:
+            print("  author_corpus.html    — author position in field corpus")
         if not args.no_influence:
             print("  author_influence.html — global author influence (OpenAlex crawl)")
         return
@@ -3652,7 +3698,7 @@ def main():
     if funder_mode:
         funder_query = args.funder or args.funder_id
         slug = re.sub(r"[^a-z0-9]+", "_", funder_query[:40].lower()).strip("_")
-        out_dir = args.output_dir or os.path.join("reports", out_prefix, "funders", slug)
+        out_dir = args.output_dir or os.path.join("reports", "funders", slug)
         os.makedirs(out_dir, exist_ok=True)
 
         con = _open_cache(args.cache)
@@ -3694,14 +3740,13 @@ def main():
             focal_ids_set = {w["id"] for w in focal_works}
             print(f"Crawling funder influence (depth={args.depth}) …")
             fw, fe, fr = _crawl_author(
-                focal_works, args.depth, args.max_refs, args.max_cites, con)
+                focal_works, args.depth, args.max_refs, args.max_cites, con,
+                d2_seeds=args.d2_seeds)
             # rename roles to funder-specific labels
             role_map = {"author_paper": "funded_work", "cites_author": "cites_funded",
                         "cited_by_author": "cited_by_funded"}
             fr = {wid: role_map.get(r, r) for wid, r in fr.items()}
-            print(f"  {len(fw)} works, {len(fe)} edges before trim")
-            fw, fe, fr = _trim_author_graph(focal_ids_set, fw, fe, args.max_nodes, fr)
-            print(f"  {len(fw)} works, {len(fe)} edges after trim")
+            print(f"  {len(fw)} works, {len(fe)} edges")
             print("Writing funder influence map …")
             _write_funder_influence_html(
                 funder_info, focal_ids_set, fw, fe, fr,
