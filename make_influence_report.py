@@ -907,6 +907,37 @@ def find_author_in_corpus(query, data):
     return str(row["author_id"]), author_name, row
 
 
+def find_project_work_ids(focal_works: list, papers_df) -> list:
+    """Match OpenAlex focal works against corpus papers_df by DOI then title."""
+    if papers_df is None or papers_df.empty:
+        return []
+    doi_col   = next((c for c in papers_df.columns if c.lower() == "doi"), None)
+    title_col = next((c for c in papers_df.columns if c.lower() == "title"), None)
+    wid_col   = next((c for c in papers_df.columns if c.lower() == "work_id"), None)
+    if wid_col is None:
+        return []
+    matched = []
+    if doi_col:
+        doi_map = {str(d).lower().strip(): wid
+                   for d, wid in zip(papers_df[doi_col], papers_df[wid_col])
+                   if str(d) not in ("nan", "", "None")}
+        for w in focal_works:
+            d = (w.get("doi") or "").lower().strip()
+            if d and d in doi_map:
+                matched.append(doi_map[d])
+    already = set(matched)
+    if title_col:
+        title_map = {str(t)[:70].lower().strip(): wid
+                     for t, wid in zip(papers_df[title_col], papers_df[wid_col])}
+        for w in focal_works:
+            t = (w.get("title") or "")[:70].lower().strip()
+            wid = title_map.get(t)
+            if wid and wid not in already:
+                matched.append(wid)
+                already.add(wid)
+    return matched
+
+
 def find_author_work_ids(author_id, data):
     """Return list of work_ids in corpus for papers by this author."""
     cp = data.get("cit_papers")
@@ -2829,7 +2860,7 @@ const cy = cytoscape({{
     {{ selector: 'node:selected', style: {{
         'border-width': 3, 'border-color': '#2980b9',
     }}}},
-    {{ selector: '.dimmed', style: {{ 'opacity': 0.1 }} }},
+    {{ selector: '.dimmed', style: {{ 'opacity': 0.18 }} }},
     {{ selector: '.highlighted', style: {{ 'opacity': 1 }} }},
   ],
   layout: {{ name: 'cose', animate: false, nodeRepulsion: 6000, idealEdgeLength: 80 }},
@@ -2863,12 +2894,16 @@ document.getElementById('tog-field').addEventListener('change', function() {{
 
 // hover labels
 cy.on('mouseover', 'node', function(e) {{
-  if (!document.getElementById('tog-labels').checked)
+  if (!document.getElementById('tog-labels').checked) {{
     e.target.style('label', e.target.data('label') || '');
+    e.target.style('font-size', _labelFs());
+  }}
 }});
 cy.on('mouseout', 'node', function(e) {{
-  if (!document.getElementById('tog-labels').checked)
+  if (!document.getElementById('tog-labels').checked) {{
     e.target.style('label', '');
+    e.target.style('font-size', 10);
+  }}
 }});
 
 // layer toggles
@@ -3005,6 +3040,526 @@ document.getElementById('help-overlay').addEventListener('click', e => {{
   if (e.target === document.getElementById('help-overlay'))
     document.getElementById('help-overlay').classList.remove('open');
 }});
+</script>
+</body>
+</html>"""
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print(f"  Written: {output_path}  ({os.path.getsize(output_path)//1024} KB)")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROJECT INFLUENCE SECTION
+# NCT trial or named grant (award_id) → focal papers → Cytoscape influence map.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+NCT_BASE  = "https://clinicaltrials.gov/api/v2/studies"
+PMID_BASE = "https://api.openalex.org/works"
+
+PROJ_INF_ROLE_COLOR = {
+    "project_paper":    "#EF553B",
+    "cites_project":    "#AB63FA",
+    "cited_by_project": "#00CC96",
+    "d2":               "#b0bec5",
+}
+
+
+def _fetch_nct_info(nct_id: str) -> Optional[dict]:
+    """Fetch trial metadata from ClinicalTrials.gov v2 API."""
+    nct_id = nct_id.upper().strip()
+    if not nct_id.startswith("NCT"):
+        nct_id = "NCT" + nct_id
+    time.sleep(REQUEST_DELAY)
+    try:
+        r = requests.get(f"{NCT_BASE}/{nct_id}",
+                         params={"format": "json"}, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException as exc:
+        print(f"  ClinicalTrials.gov error: {exc}")
+        return None
+    proto = data.get("protocolSection", {})
+    ident = proto.get("identificationModule", {})
+    desc  = proto.get("descriptionModule", {})
+    refs  = proto.get("referencesModule", {}).get("references", [])
+    pmids = [r["pmid"] for r in refs
+             if r.get("pmid") and r.get("type") in ("RESULT", "DERIVED")]
+    return {
+        "id":          nct_id,
+        "name":        ident.get("briefTitle", nct_id),
+        "type":        "nct",
+        "description": desc.get("briefSummary", "")[:300],
+        "pmids":       pmids,
+    }
+
+
+def _pmids_to_openalex(pmids: list, con) -> list:
+    """Convert PubMed IDs to OpenAlex work dicts (batched)."""
+    works = []
+    for i in range(0, len(pmids), 50):
+        batch = pmids[i:i+50]
+        time.sleep(REQUEST_DELAY)
+        data = _get(PMID_BASE, {
+            "filter":   "ids.pmid:" + "|".join(batch),
+            "select":   _OA_SELECT_NOGRANTS,
+            "per-page": 50,
+        })
+        for w in data.get("results", []):
+            meta = _extract_work(w)
+            _cache_put(con, meta["id"], meta)
+            works.append(meta)
+    return works
+
+
+def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
+    """Search OpenAlex for works that mention an NCT ID in title/abstract."""
+    works  = []
+    cursor = "*"
+    while len(works) < limit:
+        page_limit = min(PAGE_SIZE, limit - len(works))
+        time.sleep(REQUEST_DELAY)
+        data = _get(BASE_URL, {
+            "search":   nct_id,
+            "sort":     "cited_by_count:desc",
+            "select":   _OA_SELECT_NOGRANTS,
+            "per-page": page_limit,
+            "cursor":   cursor,
+        })
+        results = data.get("results") or []
+        if not results:
+            break
+        for w in results:
+            meta = _extract_work(w)
+            _cache_put(con, meta["id"], meta)
+            works.append(meta)
+        cursor = (data.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return works
+
+
+def _fetch_award_papers(award_id: str, con, limit: int = 200) -> list:
+    """Fetch works from OpenAlex by grant award_id (cursor pagination)."""
+    works  = []
+    cursor = "*"
+    while len(works) < limit:
+        page_limit = min(PAGE_SIZE, limit - len(works))
+        time.sleep(REQUEST_DELAY)
+        data = _get(BASE_URL, {
+            "filter":   f"awards.funder_award_id:{award_id}",
+            "sort":     "cited_by_count:desc",
+            "select":   _OA_SELECT_NOGRANTS,
+            "per-page": page_limit,
+            "cursor":   cursor,
+        })
+        results = data.get("results") or []
+        if not results:
+            break
+        for w in results:
+            meta = _extract_work(w)
+            _cache_put(con, meta["id"], meta)
+            works.append(meta)
+        cursor = (data.get("meta") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return works
+
+
+def _write_project_influence_html(project_info: dict, focal_ids: set,
+                                   works: dict, edges: list, roles: dict,
+                                   output_path: str):
+    field_map = {}
+    for w in works.values():
+        f = w.get("field") or "Unknown"
+        if f not in field_map:
+            field_map[f] = _FIELD_COLORS[len(field_map) % len(_FIELD_COLORS)]
+
+    role_counts = {}
+    for r in roles.values():
+        role_counts[r] = role_counts.get(r, 0) + 1
+
+    all_funders: list = sorted({f for w in works.values()
+                                 for f in (w.get("funders") or []) if f})
+
+    nodes = []
+    for wid, w in works.items():
+        cit      = w.get("cit", 0) or 0
+        role     = roles.get(wid, "d2")
+        field    = w.get("field") or "Unknown"
+        is_focal = wid in focal_ids
+        size     = 20 if is_focal else max(5, min(16, 5 + 5 * math.log1p(cit)))
+        t        = w.get("title") or ""
+        label    = (t[:28] + "…") if len(t) > 28 else t
+        countries = w.get("countries") or []
+        country_str = (", ".join(countries[:3]) + ("…" if len(countries) > 3 else "")) if countries else "—"
+        funders  = w.get("funders") or []
+        funder_str = (", ".join(funders[:3]) + ("…" if len(funders) > 3 else "")) if funders else "—"
+        nodes.append({"data": {
+            "id":          wid,
+            "label":       label,
+            "title":       t,
+            "year":        w.get("year") or 0,
+            "cit":         cit,
+            "journal":     w.get("journal") or "",
+            "field":       field,
+            "countries":   country_str,
+            "funders":     funder_str,
+            "funder_list": funders,
+            "doi":         w.get("doi") or "",
+            "role":        role,
+            "is_focal":    is_focal,
+            "size":        size,
+        }})
+
+    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
+                for s, t in edges]
+    elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
+    focal_ids_json    = json.dumps(list(focal_ids))
+    field_colors_json = json.dumps(field_map)
+    funders_json      = json.dumps(all_funders)
+
+    year_vals  = [w.get("year") or 0 for w in works.values() if w.get("year")]
+    year_min   = min(year_vals) if year_vals else 2000
+    year_max   = max(year_vals) if year_vals else 2024
+
+    n_focal    = role_counts.get("project_paper", 0)
+    n_citers   = role_counts.get("cites_project", 0)
+    n_refs     = role_counts.get("cited_by_project", 0)
+    n_d2       = role_counts.get("d2", 0)
+
+    proj_name  = project_info.get("name", "Project")
+    proj_id    = project_info.get("id", "")
+    proj_type  = project_info.get("type", "award")
+    proj_desc  = project_info.get("description", "")
+
+    type_label = "NCT Trial" if proj_type == "nct" else "Grant / Award"
+
+    field_legend = "".join(
+        f'<div class="leg-row"><span class="leg-dot" style="background:{c}"></span>'
+        f'<span class="leg-lbl">{f}</span></div>'
+        for f, c in sorted(field_map.items()))
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{proj_name} — Project Influence Map</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{display:flex;height:100vh;font-family:system-ui,sans-serif;font-size:13px;background:#f0f2f5;color:#1a1a2e}}
+#sidebar{{width:270px;min-width:270px;background:#fff;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;border-right:1px solid #dde1e8;box-shadow:2px 0 6px rgba(0,0,0,.06)}}
+#cy-wrap{{flex:1;position:relative;background:#f7f8fa}}
+#cy{{width:100%;height:100%}}
+h1{{font-size:1rem;color:#1a1a2e;line-height:1.3}}
+h2{{font-size:.75rem;color:#6070a0;font-weight:400;margin-top:2px}}
+.sec{{background:#f4f6fb;border:1px solid #dde1ee;border-radius:6px;padding:8px 10px}}
+.sec h3{{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#6070a0;margin-bottom:6px}}
+.chip{{display:flex;gap:6px;flex-wrap:wrap}}
+.chip>div{{background:#fff;border:1px solid #dde1ee;border-radius:4px;padding:4px 7px;flex:1;min-width:80px}}
+.cv{{font-size:1.1rem;font-weight:700;color:#1a1a2e}}
+.cl{{font-size:.65rem;color:#8090b0}}
+.tog-row{{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:.75rem;color:#2a2a3e}}
+.tog{{position:relative;display:inline-block;width:34px;height:18px;flex-shrink:0}}
+.tog input{{opacity:0;width:0;height:0}}
+.tog-slider{{position:absolute;inset:0;border-radius:9px;background:#c8d0e0;transition:.2s;cursor:pointer}}
+.tog-slider:before{{content:"";position:absolute;width:12px;height:12px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s}}
+.tog input:checked+.tog-slider:before{{transform:translateX(16px)}}
+.leg-dot{{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}}
+.badge{{background:#e8ecf8;border-radius:3px;padding:1px 5px;font-size:.65rem;color:#5060a0}}
+.ctrl-row{{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 0;font-size:.75rem;color:#2a2a3e}}
+.ctrl-row select{{background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:2px 4px;font-size:.72rem;flex:1}}
+button.primary{{background:#e8ecf8;color:#2a2a4e;border:1px solid #c8d0e0;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.72rem}}
+button.primary:hover{{background:#d8e0f0}}
+.fnd-select{{width:100%;background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:3px;font-size:.72rem;margin-bottom:4px}}
+.fnd-row{{display:flex;gap:4px}}
+.fnd-row input{{flex:1;background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:3px 5px;font-size:.72rem}}
+.fnd-row button{{background:#e8ecf8;color:#2a2a4e;border:1px solid #c8d0e0;border-radius:3px;padding:3px 7px;cursor:pointer;font-size:.72rem}}
+.hint{{font-size:.7rem;color:#8090b0;font-style:italic}}
+.slider-wrap{{display:flex;align-items:center;gap:6px;font-size:.7rem;color:#6070a0}}
+.slider-wrap input{{flex:1;accent-color:#5060a0}}
+.d-row{{display:flex;gap:4px;padding:2px 0;border-bottom:1px solid #e8ecf4;font-size:.72rem}}
+.d-lbl{{color:#6070a0;min-width:60px;flex-shrink:0}}
+.d-val{{color:#1a1a2e;word-break:break-word}}
+a.d-doi{{color:#3060c0;text-decoration:none}}
+a.d-doi:hover{{text-decoration:underline}}
+.leg-row{{display:flex;align-items:center;gap:5px;padding:1px 0;font-size:.7rem}}
+.leg-lbl{{color:#2a2a3e}}
+.proj-desc{{font-size:.68rem;color:#6070a0;line-height:1.4;font-style:italic}}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <div>
+    <h1>{proj_name}</h1>
+    <h2>{type_label} · {proj_id}</h2>
+    {f'<p class="proj-desc">{proj_desc}</p>' if proj_desc else ''}
+  </div>
+  <div class="sec">
+    <h3>Project</h3>
+    <div class="chip">
+      <div><div class="cv">{n_focal}</div><div class="cl">project papers</div></div>
+      <div><div class="cv">{n_citers}</div><div class="cl">citing papers</div></div>
+      <div><div class="cv">{n_refs}</div><div class="cl">cited papers</div></div>
+    </div>
+  </div>
+  <div class="sec">
+    <h3>Layers</h3>
+    <div class="tog-row">
+      <label class="tog"><input type="checkbox" id="show-cited-project" checked>
+        <span class="tog-slider" style="background:#00CC96"></span></label>
+      <span class="leg-dot" style="background:#00CC96"></span>
+      Cited by project&nbsp;<span class="badge">{n_refs}</span>
+    </div>
+    <div class="tog-row">
+      <label class="tog"><input type="checkbox" id="show-cites-project" checked>
+        <span class="tog-slider" style="background:#AB63FA"></span></label>
+      <span class="leg-dot" style="background:#AB63FA"></span>
+      Citing (n=1)&nbsp;<span class="badge">{n_citers}</span>
+    </div>
+    <div class="tog-row">
+      <label class="tog"><input type="checkbox" id="show-d2" checked>
+        <span class="tog-slider" style="background:#b0bec5"></span></label>
+      <span class="leg-dot" style="background:#b0bec5"></span>
+      Citing (n=2)&nbsp;<span class="badge">{n_d2}</span>
+    </div>
+  </div>
+  <div id="detail" class="sec">
+    <h3>Selected node</h3>
+    <p class="hint">Click a node to see details</p>
+  </div>
+  <div class="sec">
+    <h3>Year filter</h3>
+    <div class="slider-wrap">
+      <span id="yr-lo-lbl">{year_min}</span>
+      <input type="range" id="yr-lo" min="{year_min}" max="{year_max}" value="{year_min}" style="flex:1">
+    </div>
+    <div class="slider-wrap">
+      <span id="yr-hi-lbl">{year_max}</span>
+      <input type="range" id="yr-hi" min="{year_min}" max="{year_max}" value="{year_max}" style="flex:1">
+    </div>
+    <button class="primary" id="btn-yr-reset" style="margin-top:.3rem;width:100%">Reset years</button>
+  </div>
+  <div class="sec">
+    <h3>Funding source</h3>
+    <select class="fnd-select" id="funder-sel">
+      <option value="">— select funder —</option>
+    </select>
+    <div class="fnd-row">
+      <input type="text" id="funder-search" placeholder="or type to filter…">
+      <button id="funder-clear">Clear</button>
+    </div>
+    <div id="funder-count" style="font-size:.7rem;color:#777"></div>
+  </div>
+  <div class="sec">
+    <h3>Display</h3>
+    <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
+      <span class="tog-slider"></span></label>Labels</div>
+    <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-field">
+      <span class="tog-slider"></span></label>Colour by field</div>
+    <div class="ctrl-row"><label>Layout</label>
+      <select id="sel-layout">
+        <option value="cose">CoSE (default)</option>
+        <option value="circle">Circle</option>
+        <option value="concentric">Concentric</option>
+        <option value="grid">Grid</option>
+      </select>
+    </div>
+    <button class="primary" id="btn-relayout" style="margin-top:.3rem;width:100%">Re-layout</button>
+    <button class="primary" id="btn-reset" style="margin-top:.3rem;width:100%">Reset view</button>
+  </div>
+  <div class="sec" id="field-legend-sec" style="display:none">
+    <h3>Field legend</h3>
+    <div id="field-legend">{field_legend}</div>
+  </div>
+</div>
+<div id="cy-wrap">
+  <div id="cy"></div>
+</div>
+<script>
+const ELEMENTS     = {elements_json};
+const FOCAL_IDS    = new Set({focal_ids_json});
+const FIELD_COLORS = {field_colors_json};
+const ALL_FUNDERS  = {funders_json};
+const ROLE_COLOR   = {{
+  project_paper:    "#EF553B",
+  cites_project:    "#AB63FA",
+  cited_by_project: "#00CC96",
+  d2:               "#b0bec5",
+}};
+const YEAR_MIN = {year_min};
+const YEAR_MAX = {year_max};
+
+let useField = false;
+let yearLo = YEAR_MIN, yearHi = YEAR_MAX;
+let _visRoles = {{ cites_project: true, cited_by_project: true, d2: true }};
+
+function nodeColor(d) {{
+  return useField ? (FIELD_COLORS[d.field] || "#b0bec5") : (ROLE_COLOR[d.role] || "#b0bec5");
+}}
+
+const cy = cytoscape({{
+  container: document.getElementById('cy'),
+  elements: ELEMENTS,
+  style: [
+    {{ selector: 'node', style: {{
+        'background-color': d => nodeColor(d.data()),
+        'width':  'data(size)', 'height': 'data(size)',
+        'label':  '',
+        'font-size': 10,
+        'color': '#1a1a2e', 'text-valign': 'bottom', 'text-halign': 'center',
+        'text-margin-y': 3,
+        'text-outline-color': '#f0f2f5', 'text-outline-width': 2,
+        'min-zoomed-font-size': 6,
+        'shape': d => FOCAL_IDS.has(d.data('id')) ? 'star' : 'ellipse',
+        'border-width': d => FOCAL_IDS.has(d.data('id')) ? 3 : 1,
+        'border-color': d => FOCAL_IDS.has(d.data('id')) ? '#c0392b' : '#ccc',
+    }}}},
+    {{ selector: 'edge', style: {{
+        'width': 1, 'line-color': '#b0b8cc',
+        'target-arrow-color': '#909aac', 'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier', 'opacity': 0.5,
+    }}}},
+    {{ selector: 'node:selected', style: {{ 'border-width': 3, 'border-color': '#2980b9' }} }},
+    {{ selector: '.dimmed', style: {{ 'opacity': 0.18 }} }},
+  ],
+  layout: {{ name: 'cose', animate: false, nodeRepulsion: 6000, idealEdgeLength: 80 }},
+  minZoom: 0.05, maxZoom: 10,
+}});
+
+function _labelFs() {{ return 10 / Math.max(0.05, cy.zoom()); }}
+cy.on('zoom', () => {{ if (document.getElementById('tog-labels').checked) cy.nodes().style('font-size', _labelFs()); }});
+
+document.getElementById('tog-labels').addEventListener('change', function() {{
+  if (this.checked) {{ cy.nodes().forEach(n => n.style('label', n.data('label') || '')); cy.nodes().style('font-size', _labelFs()); }}
+  else {{ cy.nodes().style('label', ''); }}
+}});
+
+document.getElementById('tog-field').addEventListener('change', function() {{
+  useField = this.checked;
+  cy.nodes().forEach(n => n.style('background-color', nodeColor(n.data())));
+  document.getElementById('field-legend-sec').style.display = useField ? '' : 'none';
+}});
+
+cy.on('mouseover', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked) {{
+    e.target.style('label', e.target.data('label') || '');
+    e.target.style('font-size', _labelFs());
+  }}
+}});
+cy.on('mouseout', 'node', function(e) {{
+  if (!document.getElementById('tog-labels').checked) {{
+    e.target.style('label', '');
+    e.target.style('font-size', 10);
+  }}
+}});
+
+[['show-cites-project','cites_project'],['show-cited-project','cited_by_project'],['show-d2','d2']].forEach(([id, role]) => {{
+  document.getElementById(id).addEventListener('change', function() {{
+    _visRoles[role] = this.checked; applyFilters();
+  }});
+}});
+
+function applyFilters() {{
+  cy.nodes().forEach(n => {{
+    const y = n.data('year') || 0;
+    const focal = FOCAL_IDS.has(n.id());
+    const role  = n.data('role') || '';
+    const yearOk = focal || (y >= yearLo && y <= yearHi);
+    const roleOk = focal || _visRoles[role] !== false;
+    n.style('display', yearOk && roleOk ? 'element' : 'none');
+  }});
+  cy.edges().forEach(e => {{
+    const src = cy.getElementById(e.data('source'));
+    const tgt = cy.getElementById(e.data('target'));
+    e.style('display', src.style('display') !== 'none' && tgt.style('display') !== 'none' ? 'element' : 'none');
+  }});
+}}
+document.getElementById('yr-lo').addEventListener('input', function() {{
+  yearLo = +this.value; document.getElementById('yr-lo-lbl').textContent = yearLo;
+  if (yearLo > yearHi) {{ yearHi = yearLo; document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi; }}
+  applyFilters();
+}});
+document.getElementById('yr-hi').addEventListener('input', function() {{
+  yearHi = +this.value; document.getElementById('yr-hi-lbl').textContent = yearHi;
+  if (yearHi < yearLo) {{ yearLo = yearHi; document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo; }}
+  applyFilters();
+}});
+document.getElementById('btn-yr-reset').addEventListener('click', function() {{
+  yearLo = YEAR_MIN; yearHi = YEAR_MAX;
+  document.getElementById('yr-lo').value = yearLo; document.getElementById('yr-lo-lbl').textContent = yearLo;
+  document.getElementById('yr-hi').value = yearHi; document.getElementById('yr-hi-lbl').textContent = yearHi;
+  applyFilters();
+}});
+
+cy.on('tap', 'node', function(e) {{
+  const d = e.target.data();
+  const doi_link = d.doi ? `<a class="d-doi" href="https://doi.org/${{d.doi}}" target="_blank">DOI ↗</a>` : '—';
+  const focal_badge = FOCAL_IDS.has(d.id) ? ' <span class="badge">project paper</span>' : '';
+  document.getElementById('detail').innerHTML = `
+    <h3>Selected node</h3>
+    <div class="d-row"><span class="d-lbl">Title</span><span class="d-val">${{d.title.slice(0,120)}}${{focal_badge}}</span></div>
+    <div class="d-row"><span class="d-lbl">Year</span><span class="d-val">${{d.year||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Citations</span><span class="d-val">${{d.cit}}</span></div>
+    <div class="d-row"><span class="d-lbl">Journal</span><span class="d-val">${{d.journal.slice(0,40)||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Field</span><span class="d-val">${{d.field.slice(0,30)||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Countries</span><span class="d-val">${{d.countries}}</span></div>
+    <div class="d-row"><span class="d-lbl">Funder(s)</span><span class="d-val">${{d.funders||'—'}}</span></div>
+    <div class="d-row"><span class="d-lbl">Role</span><span class="d-val">${{d.role}}</span></div>
+    <div class="d-row"><span class="d-lbl">DOI</span><span class="d-val">${{doi_link}}</span></div>
+  `;
+  cy.elements().addClass('dimmed');
+  e.target.closedNeighborhood().removeClass('dimmed');
+}});
+cy.on('tap', e => {{
+  if (e.target === cy) {{
+    cy.elements().removeClass('dimmed');
+    document.getElementById('detail').innerHTML =
+      '<h3>Selected node</h3><p class="hint">Click a node to see details</p>';
+  }}
+}});
+
+function runLayout(name) {{
+  const opts = {{ name, animate: false }};
+  if (name === 'cose') {{ opts.nodeRepulsion = 6000; opts.idealEdgeLength = 80; }}
+  if (name === 'concentric') {{ opts.concentric = n => FOCAL_IDS.has(n.id()) ? 10 : n.data('cit'); opts.levelWidth = () => 3; }}
+  cy.layout(opts).run();
+}}
+document.getElementById('btn-relayout').addEventListener('click', () => runLayout(document.getElementById('sel-layout').value));
+document.getElementById('btn-reset').addEventListener('click', () => cy.fit(30));
+document.getElementById('sel-layout').addEventListener('change', function() {{ runLayout(this.value); }});
+
+(function initFunders() {{
+  const sel = document.getElementById('funder-sel');
+  const inp = document.getElementById('funder-search');
+  const cnt = document.getElementById('funder-count');
+  ALL_FUNDERS.forEach(f => {{
+    const opt = document.createElement('option');
+    opt.value = opt.textContent = f; sel.appendChild(opt);
+  }});
+  function applyFunder(query) {{
+    if (!query) {{
+      cy.nodes().forEach(n => {{
+        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
+        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
+      }});
+      cnt.textContent = ''; return;
+    }}
+    const q = query.toLowerCase(); let hits = 0;
+    cy.nodes().forEach(n => {{
+      const match = (n.data('funder_list') || []).some(f => f.toLowerCase().includes(q));
+      n.style('border-width', match ? 4 : (FOCAL_IDS.has(n.id()) ? 3 : 1));
+      n.style('border-color', match ? '#f39c12' : (FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff'));
+      if (match) hits++;
+    }});
+    cnt.textContent = hits ? `${{hits}} papers` : 'No matches';
+  }}
+  sel.addEventListener('change', () => {{ inp.value = ''; applyFunder(sel.value); }});
+  inp.addEventListener('input',  () => {{ sel.value = ''; applyFunder(inp.value.trim()); }});
+  document.getElementById('funder-clear').addEventListener('click', () => {{ sel.value = ''; inp.value = ''; applyFunder(''); }});
+}})();
 </script>
 </body>
 </html>"""
@@ -3396,7 +3951,7 @@ const cy = cytoscape({{
         'curve-style': 'bezier', 'opacity': 0.5,
     }}}},
     {{ selector: 'node:selected', style: {{ 'border-width': 3, 'border-color': '#2980b9' }} }},
-    {{ selector: '.dimmed', style: {{ 'opacity': 0.1 }} }},
+    {{ selector: '.dimmed', style: {{ 'opacity': 0.18 }} }},
     {{ selector: '.highlighted', style: {{ 'opacity': 1 }} }},
   ],
   layout: {{ name: 'cose', animate: false, nodeRepulsion: 6000, idealEdgeLength: 80 }},
@@ -3417,12 +3972,16 @@ document.getElementById('tog-field').addEventListener('change', function() {{
 
 // hover labels
 cy.on('mouseover', 'node', function(e) {{
-  if (!document.getElementById('tog-labels').checked)
+  if (!document.getElementById('tog-labels').checked) {{
     e.target.style('label', e.target.data('label') || '');
+    e.target.style('font-size', _labelFs());
+  }}
 }});
 cy.on('mouseout', 'node', function(e) {{
-  if (!document.getElementById('tog-labels').checked)
+  if (!document.getElementById('tog-labels').checked) {{
     e.target.style('label', '');
+    e.target.style('font-size', 10);
+  }}
 }});
 
 function applyYearFilter() {{
@@ -3555,6 +4114,15 @@ def main():
     grp.add_argument("--funder",     help="Funder name to search, e.g. 'Wellcome Trust' (funder mode)")
     grp.add_argument("--funder-id",  dest="funder_id",
                      help="OpenAlex funder URL, e.g. https://openalex.org/F126220448 (funder mode)")
+    grp.add_argument("--nct",        help="ClinicalTrials.gov NCT ID (project mode)")
+    grp.add_argument("--award-id",  dest="award_id",
+                     help="Grant award ID as in OpenAlex, e.g. 312090 (project mode)")
+
+    # Extra project source: allow both --nct and --award-id together
+    ap.add_argument("--also-nct",      dest="also_nct",
+                    help="Additional NCT ID to combine with --award-id")
+    ap.add_argument("--also-award-id", dest="also_award_id",
+                    help="Additional award ID to combine with --nct")
 
     # Shared / corpus options
     ap.add_argument("--data-dir",    default=None,
@@ -3589,8 +4157,9 @@ def main():
                          "or reports/{prefix}/authors/{slug}/)")
     args = ap.parse_args()
 
-    author_mode = bool(args.author or args.author_id)
-    funder_mode = bool(args.funder or args.funder_id)
+    author_mode  = bool(args.author or args.author_id)
+    funder_mode  = bool(args.funder or args.funder_id)
+    project_mode = bool(args.nct or args.award_id)
 
     cfg_prefix = cfg.get("prefix", "")
     data_dir   = (args.data_dir or
@@ -3755,6 +4324,132 @@ def main():
 
         print(f"\nOutput: {out_dir}/")
         print("  funder_influence.html — global funder influence (OpenAlex crawl)")
+        return
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PROJECT MODE  (--nct / --award-id)
+    # ══════════════════════════════════════════════════════════════════════════
+    if project_mode:
+        # Resolve combined sources: primary arg + optional companion
+        nct_id    = args.nct      or getattr(args, "also_nct",      None)
+        award_id  = args.award_id or getattr(args, "also_award_id", None)
+        if args.nct and getattr(args, "also_award_id", None):
+            award_id = args.also_award_id
+        if args.award_id and getattr(args, "also_nct", None):
+            nct_id = args.also_nct
+
+        con = _open_cache(args.cache)
+        seen_ids    : set  = set()
+        focal_works : list = []
+        nct_info    = None
+        award_info  = None
+
+        if nct_id:
+            print(f"\nFetching trial from ClinicalTrials.gov: {nct_id} …")
+            nct_info = _fetch_nct_info(nct_id)
+            if not nct_info:
+                print("  Trial not found — skipping NCT source.")
+            else:
+                pmids = nct_info.pop("pmids", [])
+                print(f"  {nct_info['name']}")
+                print(f"  {len(pmids)} linked PMIDs — fetching from OpenAlex …")
+                nct_works = _pmids_to_openalex(pmids, con)
+                print(f"  {len(nct_works)} works resolved via PMID")
+                for w in nct_works:
+                    if w["id"] not in seen_ids:
+                        focal_works.append(w); seen_ids.add(w["id"])
+                # Also full-text search OpenAlex for the NCT ID (ClinicalTrials links are often incomplete)
+                print(f"  Searching OpenAlex for papers mentioning {nct_id} …")
+                search_works = _search_nct_openalex(nct_id, con)
+                new_from_search = 0
+                for w in search_works:
+                    if w["id"] not in seen_ids:
+                        focal_works.append(w); seen_ids.add(w["id"]); new_from_search += 1
+                print(f"  {new_from_search} additional works found via OpenAlex search")
+
+        if award_id:
+            print(f"\nSearching OpenAlex for award_id={award_id} …")
+            award_works = _fetch_award_papers(award_id, con, limit=args.max_works)
+            print(f"  {len(award_works)} works found")
+            new = 0
+            for w in award_works:
+                if w["id"] not in seen_ids:
+                    focal_works.append(w); seen_ids.add(w["id"]); new += 1
+            if nct_id:
+                print(f"  {new} additional works not already in NCT list")
+            award_info = {
+                "id":          award_id,
+                "name":        f"Grant {award_id}",
+                "type":        "award",
+                "description": "",
+            }
+
+        # Build combined project_info
+        if nct_info and award_info:
+            project_info = {
+                "id":          f"{nct_info['id']}+{award_info['id']}",
+                "name":        nct_info["name"],
+                "type":        "nct+award",
+                "description": nct_info.get("description", ""),
+            }
+        elif nct_info:
+            project_info = nct_info
+        else:
+            project_info = award_info
+
+        if not focal_works:
+            print("  No focal papers found — aborting.")
+            con.close(); return
+
+        slug    = re.sub(r"[^a-z0-9]+", "_", project_info["id"][:40].lower()).strip("_")
+        out_dir = args.output_dir or os.path.join("reports", "projects", slug)
+        os.makedirs(out_dir, exist_ok=True)
+
+        # ── Optional corpus embedding ─────────────────────────────────────────
+        corpus_written = False
+        if not args.no_corpus:
+            print(f"Loading corpus data from {data_dir} …")
+            cdata = _load_author_corpus_data(data_dir)
+            if cdata["papers"] is None:
+                print("  papers_detail.csv not found — skipping corpus overlay.")
+                print("  Tip: use --prefix flavanol (or --data-dir data/flavanol)")
+            else:
+                focal_wids = find_project_work_ids(focal_works, cdata["papers"])
+                print(f"  {len(focal_wids)} project papers matched in corpus")
+                if focal_wids:
+                    pn, pe_c, psi = prepare_author_corpus_graph(
+                        cdata["papers"], cdata["cit_edges"],
+                        set(focal_wids),
+                        corpus_size=args.corpus_size,
+                        max_ego=args.max_ego)
+                    dummy_row = {"papers": len(focal_wids), "citations": 0, "pagerank": ""}
+                    _write_author_corpus_html(
+                        project_info["name"], dummy_row, pn, pe_c, psi,
+                        os.path.join(out_dir, "project_corpus.html"))
+                    corpus_written = True
+                else:
+                    print("  No matches found — try a different --prefix.")
+
+        # ── Influence map ─────────────────────────────────────────────────────
+        focal_ids_set = {w["id"] for w in focal_works}
+        print(f"Crawling project influence (depth={args.depth}) …")
+        pw, pe, pr = _crawl_author(
+            focal_works, args.depth, args.max_refs, args.max_cites, con,
+            d2_seeds=args.d2_seeds)
+        role_map = {"author_paper": "project_paper", "cites_author": "cites_project",
+                    "cited_by_author": "cited_by_project"}
+        pr = {wid: role_map.get(r, r) for wid, r in pr.items()}
+        print(f"  {len(pw)} works, {len(pe)} edges")
+        print("Writing project influence map …")
+        _write_project_influence_html(
+            project_info, focal_ids_set, pw, pe, pr,
+            os.path.join(out_dir, "project_influence.html"))
+        con.close()
+
+        print(f"\nOutput: {out_dir}/")
+        if corpus_written:
+            print("  project_corpus.html    — project papers in field corpus")
+        print("  project_influence.html — project influence map (OpenAlex crawl)")
         return
 
     # ══════════════════════════════════════════════════════════════════════════
