@@ -23,6 +23,9 @@ import sys
 
 import matplotlib
 matplotlib.use("Agg")
+matplotlib.rcParams["font.family"]     = "sans-serif"
+matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial", "Helvetica",
+                                           "Liberation Sans", "sans-serif"]
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 import matplotlib.lines as mlines
@@ -76,7 +79,9 @@ def parse_html(path):
 
 def select_nodes(elements, max_focal, max_cite, max_ref, max_d2):
     """Return (nodes list, keep_ids set) filtered to per-role caps.
-    A cap of 0 means unlimited."""
+    A cap of 0 means hide that layer.
+    Citing papers use stratified selection: half by citation count,
+    half by recency, so recent papers are always represented."""
     raw = [e["data"] for e in elements if "source" not in e.get("data", {})]
 
     def top(role_set, n):
@@ -84,8 +89,22 @@ def select_nodes(elements, max_focal, max_cite, max_ref, max_d2):
         pool.sort(key=lambda nd: -int(nd.get("cit", 0) or 0))
         return pool[:n] if n > 0 else []
 
+    def top_stratified(role_set, n):
+        """n/2 most-cited + n/2 most-recent, deduplicated, capped at n."""
+        if n <= 0:
+            return []
+        pool = [nd for nd in raw if nd.get("role") in role_set]
+        by_cit  = sorted(pool, key=lambda nd: -int(nd.get("cit",  0) or 0))[:n]
+        by_year = sorted(pool, key=lambda nd: -int(nd.get("year", 0) or 0))[:n]
+        seen, result = set(), []
+        for nd in by_cit + by_year:
+            if nd["id"] not in seen:
+                seen.add(nd["id"])
+                result.append(nd)
+        return result[:n]
+
     nodes = (top(FOCAL_ROLES, max_focal) +
-             top(CITE_ROLES, max_cite) +
+             top_stratified(CITE_ROLES, max_cite) +
              top(REF_ROLES, max_ref) +
              top({"d2", "corpus"}, max_d2))
     keep_ids = {nd["id"] for nd in nodes}
@@ -197,8 +216,8 @@ def choose_labels(nodes, xs, ys, top_labels, y_cap=None):
 def render(nodes, edges, title, output_path, top_labels, top_numbered, dpi):
     fig = plt.figure(figsize=(A3_W, A3_H), facecolor="white")
 
-    # ── Plot axes — upper 28 % for rotated labels, lower 26 % for number legend ──
-    ax = fig.add_axes([0.055, 0.27, 0.91, 0.46])
+    # ── Plot axes — upper 28 % for rotated labels, lower 22 % for number legend ──
+    ax = fig.add_axes([0.055, 0.28, 0.91, 0.46])
     ax.set_facecolor("white")
 
     if not nodes:
@@ -351,14 +370,14 @@ def render(nodes, edges, title, output_path, top_labels, top_numbered, dpi):
 
     # ── Numbered reference legend ──
     if numbered:
-        leg_ax = fig.add_axes([0.055, 0.025, 0.91, 0.225])
+        leg_ax = fig.add_axes([0.055, 0.018, 0.91, 0.175])
         leg_ax.set_facecolor("white")
         leg_ax.axis("off")
 
         leg_ax.plot([0, 1], [1.0, 1.0], color="#e2e8f0", lw=0.8,
                     transform=leg_ax.transAxes, clip_on=False)
 
-        n_cols   = 3
+        n_cols   = 4
         n_rows   = math.ceil(len(numbered) / n_cols)
         col_w    = 1.0 / n_cols
         row_step = 0.97 / max(n_rows, 1)
@@ -372,13 +391,12 @@ def render(nodes, edges, title, output_path, top_labels, top_numbered, dpi):
             raw   = _clean_title(nd)
             year  = nd.get("year") or ""
             cit   = _cit(nd)
-            short = (raw[:42] + "…") if len(raw) > 42 else raw
-            entry = f"{i+1:2d}.  {short}  ({year})  [{cit:,} cit.]"
+            short = (raw[:36] + "…") if len(raw) > 36 else raw
+            entry = f"{i+1:2d}. {short}  ({year})  [{cit:,}]"
 
             leg_ax.text(xpos, ypos, entry,
-                        fontsize=6.0, va="top", ha="left",
-                        transform=leg_ax.transAxes, color="#334155",
-                        fontfamily="monospace")
+                        fontsize=5.8, va="top", ha="left",
+                        transform=leg_ax.transAxes, color="#334155")
 
         leg_ax.text(0.004, 1.0 + 0.06, "Numbered papers (ranked by citations):",
                     fontsize=6.5, va="bottom", ha="left",
@@ -414,8 +432,8 @@ def main():
                     help="Max labelled nodes (default 20)")
     ap.add_argument("--max-focal",  type=int, default=999,
                     help="Max focal papers shown (default: all)")
-    ap.add_argument("--max-cite",   type=int, default=60,
-                    help="Max citing-layer nodes (default 60)")
+    ap.add_argument("--max-cite",   type=int, default=100,
+                    help="Max citing-layer nodes, half by citation half by recency (default 100)")
     ap.add_argument("--max-ref",    type=int, default=0,
                     help="Max cited-layer (reference) nodes; 0 = off (default)")
     ap.add_argument("--max-d2",     type=int, default=0,
