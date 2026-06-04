@@ -13,6 +13,11 @@ operational detail. For a quick start see [README.md](README.md).
 4. [Entry-point scripts](#4-entry-point-scripts)
    - 4.1 [make_dashboard.py](#41-make_dashboardpy)
    - 4.2 [make_influence_report.py](#42-make_influence_reportpy)
+     - [Paper mode](#paper-mode)
+     - [Author mode](#author-mode)
+     - [Funder mode](#funder-mode)
+     - [Project mode](#project-mode-nct--grant)
+     - [Shared options](#shared-options)
    - 4.4 [bibliometrics.py](#44-bibliometricspy)
    - 4.5 [build_all.sh](#45-build_allsh)
    - 4.6 [deploy.sh](#46-deploysh)
@@ -62,7 +67,7 @@ build_all.sh  ──loops over config/config.json.*──▶  make_dashboard.py
                                                     (rsync to server)
 
 Standalone tools (not called by make_dashboard):
-  make_influence_report.py — paper or author: corpus network + global influence map
+  make_influence_report.py — paper / author / funder / project: corpus + global influence map
   scripts/make_author_report.py  — per-author profile (corpus only)
   scripts/make_network_pdf.py    — print-ready PDF of citation network
 ```
@@ -126,8 +131,10 @@ upf_bibliography/
 │   ├── flavonoid/
 │   └── cocoa/
 │
-├── reports/                    # Selected outputs committed to git
-│   └── flavonoids/
+├── reports/                    # Influence reports — selectively committed to git
+│   ├── authors/{slug}/         #   author_corpus.html, author_influence.html
+│   ├── funders/{slug}/         #   funder_influence.html, funder_corpus.html
+│   └── projects/{slug}/        #   project_influence.html, project_corpus.html
 │
 └── notebooks/                  # Jupyter notebooks for exploratory work
 ```
@@ -230,12 +237,23 @@ python make_dashboard.py --data-dir path    # read CSVs from a custom directory
 
 ### 4.2 `make_influence_report.py`
 
-**Purpose:** Influence analysis for a **paper** or an **author**, combining two complementary views:
+**Purpose:** Influence analysis for a **paper**, **author**, **funder**, or **project**
+(clinical trial / research grant), combining two complementary views:
 
-- **Corpus report** — shows the focal subject (paper or author papers) inside the downloaded field corpus (reads local CSV data from `bibliometrics.py`). Fast; no network needed after the initial fetch.
-- **Influence map** — crawls OpenAlex live to map global citation influence beyond the local corpus. Results are cached in `cache/influence_cache.sqlite`.
+- **Corpus report** — shows the focal subject inside the downloaded field corpus (reads local
+  CSV data from `bibliometrics.py`). Fast; no network needed after the initial fetch.
+- **Influence map** — crawls OpenAlex live to map global citation influence beyond the local
+  corpus. Results are cached in `cache/influence_cache.sqlite`.
 
 Both sections run by default. Use `--no-corpus` or `--no-influence` to skip one.
+
+**Interactive graph features (all modes):**
+
+- Year-range slider to filter nodes by publication year
+- Layer toggles to show/hide citing papers (n=1), cited papers, and second-hop papers (n=2)
+- Hover to reveal node labels
+- Single click on a node highlights its direct neighbourhood; background click resets
+- Detail panel shows title, year, journal, and citation count for the selected node
 
 #### Paper mode
 
@@ -312,7 +330,102 @@ python make_influence_report.py --author "Hollman" --no-corpus
 | `author_paper` | red `#EF553B` | star | One of the author's own papers |
 | `cites_author` | purple `#AB63FA` | circle | Papers that cite any author paper |
 | `cited_by_author` | teal `#00CC96` | circle | Papers cited by any author paper |
-| `d2` | grey `#b0bec5` | circle | Second-hop nodes |
+| `d2` | grey `#b0bec5` | circle | Second-hop citers (layer 2 forward) |
+
+#### Funder mode
+
+```bash
+# Funder influence map by name (searches OpenAlex funders)
+python make_influence_report.py --funder "Mars" --prefix flavanol
+
+# Using a full OpenAlex funder URL
+python make_influence_report.py --funder-id "https://openalex.org/F4320321001" --prefix flavanol
+
+# With an optional corpus to embed the funder papers in
+python make_influence_report.py --funder "Mars" --prefix flavanol --data-dir data/flavanol
+```
+
+**Funder identification** (mutually exclusive):
+
+| Flag | Description |
+|------|-------------|
+| `--funder` | Funder name to search in OpenAlex |
+| `--funder-id` | Full OpenAlex funder URL — bypasses name search |
+
+**Funder mode outputs** (written to `reports/{prefix}/funders/{slug}/`):
+
+| File | Description |
+|------|-------------|
+| `funder_corpus.html` | Funder papers inside the field corpus, with star focal nodes. |
+| `funder_influence.html` | Global funder influence map — all funder papers + citation neighbourhood. |
+
+**Funder influence node roles:**
+
+| Role | Colour | Shape | Meaning |
+|------|--------|-------|---------|
+| `author_paper` | red `#EF553B` | star | Paper funded by the focal funder |
+| `cites_author` | purple `#AB63FA` | circle | Papers that cite any funder paper |
+| `cited_by_author` | teal `#00CC96` | circle | Papers cited by any funder paper |
+| `d2` | grey `#b0bec5` | circle | Second-hop citers |
+
+#### Project mode (NCT / grant)
+
+Project mode maps citation influence around a clinical trial or research grant. It combines
+two data sources:
+
+1. **ClinicalTrials.gov** — fetches the official linked publications (PMIDs) from the NCT
+   record, then resolves them to OpenAlex works.
+2. **OpenAlex full-text search** — searches OpenAlex for papers that mention the NCT ID
+   in their title or abstract, catching papers not listed in ClinicalTrials.gov.
+
+For grant-funded projects, OpenAlex is queried using `awards.funder_award_id`.
+
+```bash
+# Clinical trial
+python make_influence_report.py --nct NCT02422745
+
+# Research grant
+python make_influence_report.py --award-id 312090 --prefix flavanol
+
+# Combine NCT and award into one project
+python make_influence_report.py --nct NCT01799005 --also-award-id 312090 --prefix flavanol
+
+# Combine award with a second NCT
+python make_influence_report.py --award-id 312090 --also-nct NCT02422745 --prefix flavanol
+
+# Embed project papers in an existing corpus
+python make_influence_report.py --nct NCT02422745 --prefix flavanol --data-dir data/flavanol
+```
+
+**Project identification flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--nct` | ClinicalTrials.gov NCT ID (e.g. `NCT02422745`) — primary source |
+| `--award-id` | OpenAlex funder award ID — primary source |
+| `--also-nct` | Additional NCT ID to merge with the primary source |
+| `--also-award-id` | Additional award ID to merge with the primary source |
+
+**Project mode outputs** (written to `reports/projects/{slug}/`):
+
+| File | Description |
+|------|-------------|
+| `project_corpus.html` | Project papers inside the field corpus (requires `--data-dir`). |
+| `project_influence.html` | Global project influence map — project papers + citation neighbourhood. |
+
+**Project influence node roles:**
+
+| Role | Colour | Shape | Meaning |
+|------|--------|-------|---------|
+| `project_paper` | red `#EF553B` | star | Paper belonging to the project |
+| `cited_by_project` | teal `#00CC96` | circle | Papers cited by project papers (references) |
+| `cites_project` | purple `#AB63FA` | circle | Papers that cite project papers (n=1) |
+| `d2` | grey `#b0bec5` | circle | Second-hop citers (n=2) |
+
+The project influence map uses a **light design** (white/grey background) to visually
+distinguish it from the dark-design author and funder maps.
+
+Layer order in the legend: cited (references) → citing n=1 → citing n=2.
 
 #### Shared options
 
@@ -333,13 +446,20 @@ python make_influence_report.py --author "Hollman" --no-corpus
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--depth` | 2 | Crawl hops in each direction |
-| `--max-nodes` | 300 | Maximum nodes in trimmed output graph |
+| `--max-nodes` | 300 | Maximum nodes in trimmed output graph (paper mode only) |
 | `--max-cites` | 100 | Maximum citers fetched per focal node |
 | `--max-refs` | 50 | Maximum references fetched per focal node |
-| `--max-works` | 200 | Maximum author works fetched from OpenAlex (author mode) |
+| `--max-works` | 200 | Maximum author/funder works fetched from OpenAlex |
+| `--d2-seeds` | 15 | Number of top layer-1 citers used as seeds for the layer-2 forward pass |
 | `--cache` | `cache/influence_cache.sqlite` | SQLite cache file |
 | `--no-influence` | off | Skip influence map entirely |
 | `--output-dir` | auto | Override output directory |
+
+> **Note on graph size:** In author, funder, and project modes the graph is not post-hoc
+> trimmed — `--max-cites` and `--max-refs` control volume directly at crawl time.
+> Reduce these flags (or `--d2-seeds`) if the output HTML is too large to load comfortably.
+> Clearing `cache/influence_cache.sqlite` is only needed when you want to re-fetch data
+> that has been updated upstream in OpenAlex, not when changing these flags.
 
 ---
 
@@ -601,16 +721,24 @@ inline) — no server required; open directly in any browser.
 | `journal_dashboard.html` | `make_journal_dashboard.py` | Journal analysis |
 | `author_centrality.csv` | `make_citation_network.py` | Author PageRank/betweenness table |
 
-**Standalone tools** write to `reports/{prefix}/papers/{slug}/` or `reports/{prefix}/authors/{slug}/`:
+**Standalone tools** — output directories and files:
 
-| File | Produced by |
-|------|-------------|
-| `report.html` | `make_influence_report.py` — compact corpus graph (paper mode) |
-| `report_full.html` | `make_influence_report.py` — full corpus graph (paper mode) |
-| `influence.html` | `make_influence_report.py` — global paper influence map |
-| `author_corpus.html` | `make_influence_report.py` — author position in corpus (author mode) |
-| `author_influence.html` | `make_influence_report.py` — global author influence map |
-| `report.html` | `make_author_report.py` — author profile (corpus only) |
+| Output directory | File | Mode | Description |
+|-----------------|------|------|-------------|
+| `reports/{prefix}/papers/{slug}/` | `report.html` | paper | Compact corpus graph (top 300 nodes, ego-adjacent) |
+| `reports/{prefix}/papers/{slug}/` | `report_full.html` | paper | Full corpus graph (up to `--corpus-size` nodes) |
+| `reports/{prefix}/papers/{slug}/` | `influence.html` | paper | Global paper influence map |
+| `reports/{prefix}/authors/{slug}/` | `author_corpus.html` | author | Author's papers inside the field corpus |
+| `reports/{prefix}/authors/{slug}/` | `author_influence.html` | author | Global author influence map |
+| `reports/{prefix}/funders/{slug}/` | `funder_corpus.html` | funder | Funder papers inside the field corpus |
+| `reports/{prefix}/funders/{slug}/` | `funder_influence.html` | funder | Global funder influence map |
+| `reports/projects/{slug}/` | `project_corpus.html` | project | Project papers inside the field corpus |
+| `reports/projects/{slug}/` | `project_influence.html` | project | Global project influence map |
+| `reports/{prefix}/{author}/` | `report.html` | — | Author profile from `make_author_report.py` (corpus only) |
+
+The `{slug}` is derived from the subject name or ID (lowercased, spaces replaced with
+underscores). Project slugs use the NCT ID or award ID directly (e.g. `nct02422745`,
+`312090`).
 
 ---
 

@@ -35,6 +35,7 @@ import sqlite3
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pandas as pd
@@ -167,9 +168,8 @@ def prepare_graph_data(papers_df, cit_edges, focal_id,
     d1_all = d1_in | d1_out
 
     d2_all: set = set()
-    for nid in sorted(d1_all, key=lambda w: int(meta_cit.get(w, 0)), reverse=True)[:30]:
-        d2_all |= _top_neighbours(nid, "in",  5)
-        d2_all |= _top_neighbours(nid, "out", 5)
+    for nid in sorted(d1_in, key=lambda w: int(meta_cit.get(w, 0)), reverse=True)[:30]:
+        d2_all |= _top_neighbours(nid, "in", 5)
     d2_all -= d1_all
     d2_all.discard(focal_id)
 
@@ -997,9 +997,8 @@ def prepare_author_corpus_graph(papers_df, cit_edges, focal_ids,
     d1_all = d1_in | d1_out
 
     d2_all: set = set()
-    for nid in sorted(d1_all, key=lambda w: int(meta_cit.get(w, 0)), reverse=True)[:30]:
-        d2_all |= _top_neighbours({nid}, "in",  5)
-        d2_all |= _top_neighbours({nid}, "out", 5)
+    for nid in sorted(d1_in, key=lambda w: int(meta_cit.get(w, 0)), reverse=True)[:30]:
+        d2_all |= _top_neighbours({nid}, "in", 5)
     d2_all -= d1_all | focal_ids
 
     all_ids = corpus_ids | d1_all | d2_all
@@ -1524,7 +1523,7 @@ def _get(url, params):
 
 
 _OA_SELECT = ("id,doi,title,publication_year,cited_by_count,"
-              "primary_location,concepts,authorships,referenced_works")
+              "primary_location,topics,authorships,referenced_works")
 _OA_SELECT_NOGRANTS = _OA_SELECT  # grants not supported in select; kept as alias
 
 
@@ -1536,8 +1535,8 @@ def _extract_work(w):
     cit   = w.get("cited_by_count", 0) or 0
     source  = ((w.get("primary_location") or {}).get("source") or {})
     journal = source.get("display_name", "")
-    concepts = w.get("concepts") or []
-    field    = concepts[0]["display_name"] if concepts else ""
+    topics = w.get("topics") or []
+    field  = (topics[0].get("field") or {}).get("display_name", "") if topics else ""
     authors  = w.get("authorships") or []
     countries = list({inst.get("country_code", "")
                       for a in authors
@@ -1736,10 +1735,6 @@ def _write_influence_html(focal_id, works, edges, roles, output_path):
     for r in roles.values():
         role_counts[r] = role_counts.get(r, 0) + 1
 
-    # Collect all unique funders across the graph for the highlight list
-    all_funders: list = sorted({f for w in works.values()
-                                for f in (w.get("funders") or []) if f})
-
     nodes = []
     for wid, w in works.items():
         cit   = w.get("cit", 0) or 0
@@ -1776,7 +1771,6 @@ def _write_influence_html(focal_id, works, edges, roles, output_path):
                 for s, t in edges]
     elements_json   = json.dumps(nodes + cy_edges, separators=(",", ":"))
     field_colors_json = json.dumps(field_map)
-    funders_json    = json.dumps(all_funders)
 
     focal_title = (focal.get("title") or "Unknown")[:80]
     focal_year  = focal.get("year") or ""
@@ -1901,14 +1895,6 @@ td{{padding:.18rem .4rem;border-bottom:1px solid #f0f2f5;vertical-align:top}}
 .close-btn{{float:right;background:transparent;border:none;font-size:1.1rem;
   cursor:pointer;color:#888;line-height:1}}
 .close-btn:hover{{color:#222}}
-/* funder search */
-.fnd-row{{display:flex;gap:.3rem;margin-bottom:.25rem}}
-.fnd-row input{{flex:1;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;border-radius:3px}}
-.fnd-row button{{font-size:.72rem;padding:.15rem .4rem;border-radius:3px;
-  border:1px solid #ccc;background:#f4f6fa;cursor:pointer;white-space:nowrap}}
-.fnd-row button:hover{{background:#e0e6ec}}
-.fnd-select{{width:100%;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;
-  border-radius:3px;margin-bottom:.25rem}}
 </style>
 </head>
 <body>
@@ -1945,7 +1931,6 @@ td{{padding:.18rem .4rem;border-bottom:1px solid #f0f2f5;vertical-align:top}}
       <tr><td>Show labels</td><td>Display title snippets on each node (can slow large graphs)</td></tr>
       <tr><td>Colour by field</td><td>Recolour nodes by research field; field legend appears below</td></tr>
       <tr><td>Year filter</td><td>Drag the sliders or type years to hide works outside the range; focal paper is always shown</td></tr>
-      <tr><td>Funding source</td><td>Pick a funder from the list or type to search — matching nodes are highlighted in gold; click <em>Clear</em> to reset</td></tr>
       <tr><td>Layout → Re-layout</td><td>Re-run the chosen graph layout algorithm</td></tr>
       <tr><td>Fit</td><td>Zoom to fit all visible nodes</td></tr>
       <tr><td>Centre focal</td><td>Zoom and pan to the focal paper node</td></tr>
@@ -2034,18 +2019,6 @@ td{{padding:.18rem .4rem;border-bottom:1px solid #f0f2f5;vertical-align:top}}
     </div>
 
     <div class="sec">
-      <h3>Funding source</h3>
-      <select class="fnd-select" id="funder-sel">
-        <option value="">— select funder —</option>
-      </select>
-      <div class="fnd-row">
-        <input type="text" id="funder-search" placeholder="or type to filter…">
-        <button id="funder-clear">Clear</button>
-      </div>
-      <div id="funder-count" style="font-size:.7rem;color:#777"></div>
-    </div>
-
-    <div class="sec">
       <h3>Layout</h3>
       <div class="ctrl-row">
         <label>Algorithm</label>
@@ -2103,8 +2076,6 @@ const FOCAL_ID     = {json.dumps(focal_id)};
 const YEAR_MIN     = {year_min};
 const YEAR_MAX     = {year_max};
 const FIELD_COLORS = {field_colors_json};
-const ALL_FUNDERS  = {funders_json};
-
 const cy = cytoscape({{
   container: document.getElementById('cy'),
   elements:  ELEMENTS,
@@ -2279,49 +2250,6 @@ document.querySelectorAll('.tab').forEach(tab => {{
   }});
 }})();
 
-// ── Funder highlight ────────────────────────────────────────────────────────
-(function initFunders() {{
-  const sel = document.getElementById('funder-sel');
-  const inp = document.getElementById('funder-search');
-  const cnt = document.getElementById('funder-count');
-  ALL_FUNDERS.forEach(f => {{
-    const opt = document.createElement('option');
-    opt.value = opt.textContent = f;
-    sel.appendChild(opt);
-  }});
-  function applyFunder(query) {{
-    if (!query) {{
-      cy.nodes().forEach(n => n.style('border-width', n.data('focal') ? 3 : 1));
-      cy.nodes().forEach(n => n.style('border-color', n.data('focal') ? '#fff' : '#fff'));
-      cnt.textContent = '';
-      return;
-    }}
-    const q = query.toLowerCase();
-    let hits = 0;
-    cy.nodes().forEach(n => {{
-      const flist = n.data('funder_list') || [];
-      const match = flist.some(f => f.toLowerCase().includes(q));
-      if (match) {{
-        n.style('border-width', 4);
-        n.style('border-color', '#f39c12');
-        hits++;
-      }} else {{
-        n.style('border-width', n.data('focal') ? 3 : 1);
-        n.style('border-color', n.data('focal') ? '#fff' : '#fff');
-      }}
-    }});
-    cnt.textContent = hits ? `${{hits}} match${{hits===1?'':'es'}}` : 'No matches';
-  }}
-  sel.addEventListener('change', () => {{ inp.value = sel.value; applyFunder(sel.value); }});
-  inp.addEventListener('input', () => {{
-    sel.value = '';
-    applyFunder(inp.value.trim());
-  }});
-  document.getElementById('funder-clear').addEventListener('click', () => {{
-    sel.value = ''; inp.value = ''; applyFunder('');
-  }});
-}})();
-
 // ── Help modal ──────────────────────────────────────────────────────────────
 document.getElementById('help-open').addEventListener('click',
   () => document.getElementById('help-overlay').classList.add('open'));
@@ -2450,14 +2378,20 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
                 edges_set.add((w["id"], seed["id"]))
 
 
-    # Cross-edges within known works
+    # Cross-edges within known works — source must not predate target
+    # (guards against OpenAlex referenced_works errors and preprint dating mismatches)
     all_ids = set(works.keys())
     added = 0
     for wid, w in works.items():
+        src_year = int(w.get("year") or 0)
         for rid in (w.get("ref_ids") or []):
-            if rid in all_ids and rid != wid and (wid, rid) not in edges_set:
-                edges_set.add((wid, rid))
-                added += 1
+            if rid not in all_ids or rid == wid or (wid, rid) in edges_set:
+                continue
+            tgt_year = int((works[rid].get("year") or 0))
+            if tgt_year and src_year and src_year < tgt_year - 1:
+                continue  # source predates target by >1 year — skip bogus edge
+            edges_set.add((wid, rid))
+            added += 1
     print(f"  cross-edges from metadata: +{added}")
 
     return works, list(edges_set), roles
@@ -2524,9 +2458,6 @@ def _write_author_influence_html(author_info: dict, focal_ids: set,
     for r in roles.values():
         role_counts[r] = role_counts.get(r, 0) + 1
 
-    all_funders_aut: list = sorted({f for w in works.values()
-                                    for f in (w.get("funders") or []) if f})
-
     nodes = []
     for wid, w in works.items():
         cit   = w.get("cit", 0) or 0
@@ -2565,7 +2496,6 @@ def _write_author_influence_html(author_info: dict, focal_ids: set,
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
-    funders_json_aut  = json.dumps(all_funders_aut)
 
     author_name   = author_info.get("name", "Author")
     works_count   = author_info.get("works_count", len(focal_ids))
@@ -2663,14 +2593,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
 .close-btn{{float:right;background:transparent;border:none;font-size:1.1rem;
   cursor:pointer;color:#888;line-height:1}}
 .close-btn:hover{{color:#222}}
-/* funder search */
-.fnd-row{{display:flex;gap:.3rem;margin-bottom:.25rem}}
-.fnd-row input{{flex:1;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;border-radius:3px}}
-.fnd-row button{{font-size:.72rem;padding:.15rem .4rem;border-radius:3px;
-  border:1px solid #ccc;background:#f4f6fa;cursor:pointer;white-space:nowrap}}
-.fnd-row button:hover{{background:#e0e6ec}}
-.fnd-select{{width:100%;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;
-  border-radius:3px;margin-bottom:.25rem}}
 </style>
 </head>
 <body>
@@ -2707,7 +2629,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
       <tr><td>Labels toggle</td><td>Show/hide title snippets on nodes (can slow large graphs)</td></tr>
       <tr><td>Colour by field</td><td>Recolour nodes by research field; field legend appears below</td></tr>
       <tr><td>Year filter</td><td>Drag sliders to hide works outside the year range; author papers are always shown</td></tr>
-      <tr><td>Funding source</td><td>Pick or type a funder — matching nodes are highlighted in gold; click <em>Clear</em> to reset</td></tr>
       <tr><td>Layout → Re-layout</td><td>Re-run the chosen graph layout algorithm</td></tr>
       <tr><td>Reset view</td><td>Zoom to fit all visible nodes</td></tr>
     </table>
@@ -2778,17 +2699,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
         <button class="primary" id="btn-yr-reset" style="margin-top:.3rem;width:100%">Reset years</button>
       </div>
       <div class="sec">
-        <h3>Funding source</h3>
-        <select class="fnd-select" id="funder-sel">
-          <option value="">— select funder —</option>
-        </select>
-        <div class="fnd-row">
-          <input type="text" id="funder-search" placeholder="or type to filter…">
-          <button id="funder-clear">Clear</button>
-        </div>
-        <div id="funder-count" style="font-size:.7rem;color:#777"></div>
-      </div>
-      <div class="sec">
         <h3>Display</h3>
         <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
           <span class="tog-slider"></span></label>Labels</div>
@@ -2817,7 +2727,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
 const ELEMENTS     = {elements_json};
 const FOCAL_IDS    = new Set({focal_ids_json});
 const FIELD_COLORS = {field_colors_json};
-const ALL_FUNDERS  = {funders_json_aut};
 const ROLE_COLOR   = {{
   author_paper:    "#EF553B",
   cites_author:    "#AB63FA",
@@ -2992,45 +2901,6 @@ document.getElementById('sel-layout').addEventListener('change', function() {{
   runLayout(this.value);
 }});
 
-// ── Funder highlight ────────────────────────────────────────────────────────
-(function initFunders() {{
-  const sel = document.getElementById('funder-sel');
-  const inp = document.getElementById('funder-search');
-  const cnt = document.getElementById('funder-count');
-  ALL_FUNDERS.forEach(f => {{
-    const opt = document.createElement('option');
-    opt.value = opt.textContent = f;
-    sel.appendChild(opt);
-  }});
-  function applyFunder(query) {{
-    if (!query) {{
-      cy.nodes().forEach(n => {{
-        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
-        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
-      }});
-      cnt.textContent = ''; return;
-    }}
-    const q = query.toLowerCase();
-    let hits = 0;
-    cy.nodes().forEach(n => {{
-      const flist = n.data('funder_list') || [];
-      const match = flist.some(f => f.toLowerCase().includes(q));
-      if (match) {{
-        n.style('border-width', 4); n.style('border-color', '#f39c12'); hits++;
-      }} else {{
-        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
-        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
-      }}
-    }});
-    cnt.textContent = hits ? `${{hits}} match${{hits===1?'':'es'}}` : 'No matches';
-  }}
-  sel.addEventListener('change', () => {{ inp.value = sel.value; applyFunder(sel.value); }});
-  inp.addEventListener('input', () => {{ sel.value = ''; applyFunder(inp.value.trim()); }});
-  document.getElementById('funder-clear').addEventListener('click', () => {{
-    sel.value = ''; inp.value = ''; applyFunder('');
-  }});
-}})();
-
 // ── Help modal ──────────────────────────────────────────────────────────────
 document.getElementById('help-open').addEventListener('click',
   () => document.getElementById('help-overlay').classList.add('open'));
@@ -3121,7 +2991,7 @@ def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
         page_limit = min(PAGE_SIZE, limit - len(works))
         time.sleep(REQUEST_DELAY)
         data = _get(BASE_URL, {
-            "search":   nct_id,
+            "filter":   f'abstract.search:"{nct_id}"',
             "sort":     "cited_by_count:desc",
             "select":   _OA_SELECT_NOGRANTS,
             "per-page": page_limit,
@@ -3180,9 +3050,6 @@ def _write_project_influence_html(project_info: dict, focal_ids: set,
     for r in roles.values():
         role_counts[r] = role_counts.get(r, 0) + 1
 
-    all_funders: list = sorted({f for w in works.values()
-                                 for f in (w.get("funders") or []) if f})
-
     nodes = []
     for wid, w in works.items():
         cit      = w.get("cit", 0) or 0
@@ -3218,7 +3085,6 @@ def _write_project_influence_html(project_info: dict, focal_ids: set,
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
-    funders_json      = json.dumps(all_funders)
 
     year_vals  = [w.get("year") or 0 for w in works.values() if w.get("year")]
     year_min   = min(year_vals) if year_vals else 2000
@@ -3273,10 +3139,6 @@ h2{{font-size:.75rem;color:#6070a0;font-weight:400;margin-top:2px}}
 .ctrl-row select{{background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:2px 4px;font-size:.72rem;flex:1}}
 button.primary{{background:#e8ecf8;color:#2a2a4e;border:1px solid #c8d0e0;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.72rem}}
 button.primary:hover{{background:#d8e0f0}}
-.fnd-select{{width:100%;background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:3px;font-size:.72rem;margin-bottom:4px}}
-.fnd-row{{display:flex;gap:4px}}
-.fnd-row input{{flex:1;background:#fff;color:#1a1a2e;border:1px solid #c8d0e0;border-radius:3px;padding:3px 5px;font-size:.72rem}}
-.fnd-row button{{background:#e8ecf8;color:#2a2a4e;border:1px solid #c8d0e0;border-radius:3px;padding:3px 7px;cursor:pointer;font-size:.72rem}}
 .hint{{font-size:.7rem;color:#8090b0;font-style:italic}}
 .slider-wrap{{display:flex;align-items:center;gap:6px;font-size:.7rem;color:#6070a0}}
 .slider-wrap input{{flex:1;accent-color:#5060a0}}
@@ -3343,17 +3205,6 @@ a.d-doi:hover{{text-decoration:underline}}
     <button class="primary" id="btn-yr-reset" style="margin-top:.3rem;width:100%">Reset years</button>
   </div>
   <div class="sec">
-    <h3>Funding source</h3>
-    <select class="fnd-select" id="funder-sel">
-      <option value="">— select funder —</option>
-    </select>
-    <div class="fnd-row">
-      <input type="text" id="funder-search" placeholder="or type to filter…">
-      <button id="funder-clear">Clear</button>
-    </div>
-    <div id="funder-count" style="font-size:.7rem;color:#777"></div>
-  </div>
-  <div class="sec">
     <h3>Display</h3>
     <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
       <span class="tog-slider"></span></label>Labels</div>
@@ -3382,7 +3233,6 @@ a.d-doi:hover{{text-decoration:underline}}
 const ELEMENTS     = {elements_json};
 const FOCAL_IDS    = new Set({focal_ids_json});
 const FIELD_COLORS = {field_colors_json};
-const ALL_FUNDERS  = {funders_json};
 const ROLE_COLOR   = {{
   project_paper:    "#EF553B",
   cites_project:    "#AB63FA",
@@ -3531,35 +3381,6 @@ document.getElementById('btn-relayout').addEventListener('click', () => runLayou
 document.getElementById('btn-reset').addEventListener('click', () => cy.fit(30));
 document.getElementById('sel-layout').addEventListener('change', function() {{ runLayout(this.value); }});
 
-(function initFunders() {{
-  const sel = document.getElementById('funder-sel');
-  const inp = document.getElementById('funder-search');
-  const cnt = document.getElementById('funder-count');
-  ALL_FUNDERS.forEach(f => {{
-    const opt = document.createElement('option');
-    opt.value = opt.textContent = f; sel.appendChild(opt);
-  }});
-  function applyFunder(query) {{
-    if (!query) {{
-      cy.nodes().forEach(n => {{
-        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
-        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
-      }});
-      cnt.textContent = ''; return;
-    }}
-    const q = query.toLowerCase(); let hits = 0;
-    cy.nodes().forEach(n => {{
-      const match = (n.data('funder_list') || []).some(f => f.toLowerCase().includes(q));
-      n.style('border-width', match ? 4 : (FOCAL_IDS.has(n.id()) ? 3 : 1));
-      n.style('border-color', match ? '#f39c12' : (FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff'));
-      if (match) hits++;
-    }});
-    cnt.textContent = hits ? `${{hits}} papers` : 'No matches';
-  }}
-  sel.addEventListener('change', () => {{ inp.value = ''; applyFunder(sel.value); }});
-  inp.addEventListener('input',  () => {{ sel.value = ''; applyFunder(inp.value.trim()); }});
-  document.getElementById('funder-clear').addEventListener('click', () => {{ sel.value = ''; inp.value = ''; applyFunder(''); }});
-}})();
 </script>
 </body>
 </html>"""
@@ -3589,47 +3410,174 @@ def _fetch_funder_openalex(query: str) -> Optional[dict]:
     data = _get("https://api.openalex.org/funders", {
         "search":   query,
         "per-page": 5,
-        "select":   "id,display_name,works_count,grants_count,description",
+        "select":   "id,display_name,works_count,description",
     })
     results = data.get("results") or []
     if not results:
         return None
     best = results[0]
+    funder_id = best.get("id", "")
+    # Fetch the full funder record to get works_api_url (not selectable in search)
+    works_api_url = ""
+    if funder_id:
+        time.sleep(REQUEST_DELAY)
+        short_id = funder_id.split("/")[-1]
+        detail = _get(f"https://api.openalex.org/funders/{short_id}", {})
+        works_api_url = detail.get("works_api_url", "")
+        print(f"  works_api_url from OpenAlex: {works_api_url}")
     return {
-        "id":           best.get("id", ""),
+        "id":           funder_id,
         "name":         best.get("display_name", query),
         "works_count":  best.get("works_count", 0),
-        "grants_count": best.get("grants_count", 0),
+        "grants_count": 0,
         "description":  (best.get("description") or "")[:120],
+        "works_api_url": works_api_url,
     }
 
 
-def _fetch_funder_works_openalex(funder_id: str, con, limit: int = 50) -> list:
-    """Fetch top-cited works funded by this funder (cursor pagination)."""
+_OA_SELECT_MINIMAL = "id,doi,title,publication_year,cited_by_count,primary_location,authorships"
+
+
+def _fetch_funder_works_openalex(funder_id: str, con, limit: int = 50,
+                                  works_api_url: str = "") -> list:
+    """Fetch top-cited works funded by this funder.
+
+    Tries multiple filter variants (OpenAlex has renamed funder fields) and
+    falls back to a minimal select + per-work enrichment if the full select
+    triggers a 400.
+    """
     short_id = funder_id.split("/")[-1]
-    works = []
-    cursor = "*"
-    while len(works) < limit:
-        page_limit = min(PAGE_SIZE, limit - len(works))
-        time.sleep(REQUEST_DELAY)
-        data = _get(BASE_URL, {
-            "filter":   f"grants.funder:{short_id}",
-            "sort":     "cited_by_count:desc",
-            "select":   _OA_SELECT_NOGRANTS,
-            "per-page": page_limit,
-            "cursor":   cursor,
+
+    # Build ordered list of filter candidates
+    filter_candidates: list = []
+    if works_api_url:
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(works_api_url).query)
+        api_filter = qs.get("filter", [""])[0]
+        if api_filter:
+            filter_candidates.append(api_filter)
+    for candidate in (f"awards.funder:{short_id}",
+                      f"grants.funder:{short_id}",
+                      f"grants.funder:https://openalex.org/{short_id}"):
+        if candidate not in filter_candidates:
+            filter_candidates.append(candidate)
+
+    def _try_fetch(flt, sel=None):
+        """Fetch works with filter; sel=None omits the select param.
+        Returns (works, ok, reason) where reason is 'ok'/'400'/'empty'."""
+        result, cursor = [], "*"
+        while len(result) < limit:
+            params = {
+                "filter":   flt,
+                "sort":     "cited_by_count:desc",
+                "per-page": min(PAGE_SIZE, limit - len(result)),
+                "cursor":   cursor,
+            }
+            if sel is not None:
+                params["select"] = sel
+            time.sleep(REQUEST_DELAY)
+            try:
+                data = _get(BASE_URL, params)
+            except Exception as exc:
+                if "400" in str(exc):
+                    return [], False, "400"
+                raise
+            rows = data.get("results") or []
+            if not rows:
+                break
+            for w in rows:
+                meta = _extract_work(w)
+                _cache_put(con, meta["id"], meta)
+                result.append(meta)
+            cursor = (data.get("meta") or {}).get("next_cursor")
+            if not cursor:
+                break
+        reason = "ok" if result else "empty"
+        return result, bool(result), reason
+
+    for flt in filter_candidates:
+        print(f"  trying filter: {flt}")
+        # Probe with no select to confirm filter is valid before adding select fields
+        _, filter_ok, reason = _try_fetch(flt, sel=None)
+        if reason == "400":
+            print(f"    filter itself returns 400 — skipping")
+            continue
+        if reason == "empty":
+            print(f"    filter valid but 0 results — skipping")
+            continue
+        # Filter works — now try with full select, fall back to minimal
+        works, ok, reason = _try_fetch(flt, _OA_SELECT_NOGRANTS)
+        if reason == "400":
+            print(f"    full select returned 400; retrying with minimal select …")
+            works, ok, reason = _try_fetch(flt, _OA_SELECT_MINIMAL)
+            if reason == "400":
+                print(f"    minimal select also 400; using no-select fetch …")
+                works, ok, _ = _try_fetch(flt, sel=None)
+            if ok and works:
+                print(f"    enriching {len(works)} works with full metadata …")
+                works = [_fetch_work(w["id"], con) or w for w in works]
+        if works:
+            print(f"  found {len(works)} works via {flt}")
+            return works
+        print(f"    0 results — trying next filter …")
+
+    # All funder filters failed — fall back to institution-based lookup.
+    # For companies, OpenAlex tracks research output via author affiliation rather
+    # than grants, so institution filter is the practical equivalent.
+    print("  funder filters exhausted — trying institution fallback …")
+    inst_id = _find_institution_id(funder_id.split("/")[-1])
+    if inst_id:
+        inst_filter = f"authorships.institutions.id:{inst_id}"
+        print(f"  trying institution filter: {inst_filter}")
+        works, ok, reason = _try_fetch(inst_filter, _OA_SELECT_NOGRANTS)
+        if reason == "400":
+            works, ok, _ = _try_fetch(inst_filter, _OA_SELECT_MINIMAL)
+            if ok and works:
+                works = [_fetch_work(w["id"], con) or w for w in works]
+        if works:
+            print(f"  found {len(works)} works via institution affiliation")
+            return works
+
+    print("  WARNING: no works found via funder or institution filters")
+    return []
+
+
+def _find_institution_id(funder_short_id: str) -> str:
+    """Look up the OpenAlex institution ID that corresponds to a funder.
+
+    Fetches the funder record and checks if it lists an associated institution
+    (funders often have a matching institution entry in OpenAlex).  Returns the
+    short institution ID (e.g. 'I12345678') or empty string if not found.
+    """
+    time.sleep(REQUEST_DELAY)
+    try:
+        detail = _get(f"https://api.openalex.org/funders/{funder_short_id}", {})
+    except Exception:
+        return ""
+    # Some funders carry an 'ids.ror' or 'ids.openalex' for their institution
+    ids = detail.get("ids") or {}
+    roles = detail.get("roles") or []
+    # Prefer a role entry of type 'institution'
+    for role in roles:
+        if role.get("role") == "institution":
+            inst_url = role.get("id", "")
+            if inst_url:
+                return inst_url.split("/")[-1]
+    # Fall back: search institutions by the funder display name
+    name = detail.get("display_name", "")
+    if not name:
+        return ""
+    time.sleep(REQUEST_DELAY)
+    try:
+        data = _get("https://api.openalex.org/institutions", {
+            "search": name, "per-page": 3,
+            "select": "id,display_name",
         })
-        results = data.get("results") or []
-        if not results:
-            break
-        for w in results:
-            meta = _extract_work(w)
-            _cache_put(con, meta["id"], meta)
-            works.append(meta)
-        cursor = (data.get("meta") or {}).get("next_cursor")
-        if not cursor:
-            break
-    return works
+    except Exception:
+        return ""
+    results = data.get("results") or []
+    if results:
+        return results[0].get("id", "").split("/")[-1]
+    return ""
 
 
 def _write_funder_influence_html(funder_info: dict, focal_ids: set,
@@ -3644,9 +3592,6 @@ def _write_funder_influence_html(funder_info: dict, focal_ids: set,
     role_counts = {}
     for r in roles.values():
         role_counts[r] = role_counts.get(r, 0) + 1
-
-    all_funders_fnd: list = sorted({f for w in works.values()
-                                    for f in (w.get("funders") or []) if f})
 
     nodes = []
     for wid, w in works.items():
@@ -3686,7 +3631,6 @@ def _write_funder_influence_html(funder_info: dict, focal_ids: set,
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
-    funders_json_fnd  = json.dumps(all_funders_fnd)
 
     funder_name   = funder_info.get("name", "Funder")
     works_count   = funder_info.get("works_count", 0)
@@ -3782,13 +3726,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
 .close-btn{{float:right;background:transparent;border:none;font-size:1.1rem;
   cursor:pointer;color:#888;line-height:1}}
 .close-btn:hover{{color:#222}}
-.fnd-row{{display:flex;gap:.3rem;margin-bottom:.25rem}}
-.fnd-row input{{flex:1;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;border-radius:3px}}
-.fnd-row button{{font-size:.72rem;padding:.15rem .4rem;border-radius:3px;
-  border:1px solid #ccc;background:#f4f6fa;cursor:pointer;white-space:nowrap}}
-.fnd-row button:hover{{background:#e0e6ec}}
-.fnd-select{{width:100%;font-size:.78rem;padding:.15rem .3rem;border:1px solid #ccc;
-  border-radius:3px;margin-bottom:.25rem}}
 </style>
 </head>
 <body>
@@ -3821,7 +3758,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
       <tr><td>Labels</td><td>Toggle title snippets on nodes</td></tr>
       <tr><td>Colour by field</td><td>Recolour by research field</td></tr>
       <tr><td>Year filter</td><td>Hide works outside the year range; funded papers always shown</td></tr>
-      <tr><td>Co-funder</td><td>Highlight nodes that share another funder</td></tr>
       <tr><td>Re-layout</td><td>Re-run the chosen layout algorithm</td></tr>
     </table>
     <h3>Data source</h3>
@@ -3870,15 +3806,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
       <button class="primary" id="btn-yr-reset" style="margin-top:.3rem;width:100%">Reset years</button>
     </div>
     <div class="sec">
-      <h3>Co-funder highlight</h3>
-      <select class="fnd-select" id="funder-sel"><option value="">— select co-funder —</option></select>
-      <div class="fnd-row">
-        <input type="text" id="funder-search" placeholder="or type to filter…">
-        <button id="funder-clear">Clear</button>
-      </div>
-      <div id="funder-count" style="font-size:.7rem;color:#777"></div>
-    </div>
-    <div class="sec">
       <h3>Display</h3>
       <div class="tog-row"><label class="tog"><input type="checkbox" id="tog-labels">
         <span class="tog-slider"></span></label>Labels</div>
@@ -3911,7 +3838,6 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
 const ELEMENTS     = {elements_json};
 const FOCAL_IDS    = new Set({focal_ids_json});
 const FIELD_COLORS = {field_colors_json};
-const ALL_FUNDERS  = {funders_json_fnd};
 const ROLE_COLOR   = {{
   funded_work:     "#EF553B",
   cites_funded:    "#AB63FA",
@@ -4047,32 +3973,6 @@ document.getElementById('btn-relayout').addEventListener('click', () => runLayou
 document.getElementById('btn-reset').addEventListener('click', () => cy.fit(30));
 document.getElementById('sel-layout').addEventListener('change', function() {{ runLayout(this.value); }});
 
-(function initFunders() {{
-  const sel = document.getElementById('funder-sel');
-  const inp = document.getElementById('funder-search');
-  const cnt = document.getElementById('funder-count');
-  ALL_FUNDERS.forEach(f => {{ const o = document.createElement('option'); o.value = o.textContent = f; sel.appendChild(o); }});
-  function applyFunder(q) {{
-    if (!q) {{
-      cy.nodes().forEach(n => {{
-        n.style('border-width', FOCAL_IDS.has(n.id()) ? 3 : 1);
-        n.style('border-color', FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff');
-      }}); cnt.textContent = ''; return;
-    }}
-    const ql = q.toLowerCase(); let hits = 0;
-    cy.nodes().forEach(n => {{
-      const match = (n.data('funder_list') || []).some(f => f.toLowerCase().includes(ql));
-      n.style('border-width', match ? 4 : (FOCAL_IDS.has(n.id()) ? 3 : 1));
-      n.style('border-color', match ? '#f39c12' : (FOCAL_IDS.has(n.id()) ? '#c0392b' : '#fff'));
-      if (match) hits++;
-    }});
-    cnt.textContent = hits ? `${{hits}} match${{hits===1?'':'es'}}` : 'No matches';
-  }}
-  sel.addEventListener('change', () => {{ inp.value = sel.value; applyFunder(sel.value); }});
-  inp.addEventListener('input', () => {{ sel.value = ''; applyFunder(inp.value.trim()); }});
-  document.getElementById('funder-clear').addEventListener('click', () => {{ sel.value=''; inp.value=''; applyFunder(''); }});
-}})();
-
 document.getElementById('help-open').addEventListener('click', () => document.getElementById('help-overlay').classList.add('open'));
 document.getElementById('help-close').addEventListener('click', () => document.getElementById('help-overlay').classList.remove('open'));
 document.getElementById('help-overlay').addEventListener('click', e => {{
@@ -4162,6 +4062,10 @@ def main():
     project_mode = bool(args.nct or args.award_id)
 
     cfg_prefix = cfg.get("prefix", "")
+    # In author/project/funder mode, corpus is opt-in: only use config prefix when
+    # the user explicitly passed --data-dir or --prefix.
+    if (author_mode or project_mode or funder_mode) and not args.data_dir and not args.prefix:
+        cfg_prefix = ""
     data_dir   = (args.data_dir or
                   (os.path.join(DEFAULT_DATA_BASE, args.prefix or cfg_prefix)
                    if (args.prefix or cfg_prefix) else DEFAULT_DATA_BASE))
@@ -4300,7 +4204,8 @@ def main():
               f"({funder_info['works_count']:,} funded works in OA)")
         print(f"Fetching top-cited funded works (limit={args.max_funded}) …")
         focal_works = _fetch_funder_works_openalex(
-            funder_info["id"], con, limit=args.max_funded)
+            funder_info["id"], con, limit=args.max_funded,
+            works_api_url=funder_info.get("works_api_url", ""))
         print(f"  {len(focal_works)} works fetched")
 
         if not focal_works:

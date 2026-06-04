@@ -5,6 +5,10 @@ Point it at any set of search terms and it produces a full suite of interactive 
 publication trends, country and institution rankings, author networks, study-type breakdown,
 journal analysis, a world map, and a citation network explorer — all as self-contained HTML files.
 
+A standalone influence-map tool (`make_influence_report.py`) generates interactive Cytoscape.js
+graphs for individual **authors**, **funders**, and **clinical trial / grant projects**, showing
+global citation reach beyond any single corpus.
+
 For full details see [DOCS.md](DOCS.md).
 
 ---
@@ -25,6 +29,36 @@ python make_dashboard.py --fetch
 ```
 
 Output lands in `output/{prefix}/`. Open `output/{prefix}/index.html` in any browser.
+
+---
+
+## Influence maps (author / funder / project)
+
+`make_influence_report.py` is a standalone tool that crawls OpenAlex live and builds
+an interactive Cytoscape.js graph of global citation influence. Three modes are available:
+
+```bash
+# Author influence map
+python make_influence_report.py --author "Monteiro" --data-dir data/upf
+
+# Funder influence map
+python make_influence_report.py --funder "Mars" --prefix flavanol
+
+# Clinical trial (NCT) — combined ClinicalTrials.gov + OpenAlex full-text search
+python make_influence_report.py --nct NCT02422745
+
+# Research grant (OpenAlex award ID)
+python make_influence_report.py --award-id 312090 --prefix flavanol
+
+# Combine NCT and award sources, optionally embed in an existing corpus
+python make_influence_report.py --nct NCT01799005 --also-award-id 312090 \
+    --prefix flavanol --data-dir data/flavanol
+```
+
+Outputs are written to `reports/authors/{slug}/`, `reports/funders/{slug}/`, or
+`reports/projects/{slug}/`. All HTML files are self-contained — open in any browser.
+
+See [section 4.2 of DOCS.md](DOCS.md#42-make_influence_reportpy) for the full CLI reference.
 
 ---
 
@@ -78,7 +112,7 @@ python make_dashboard.py --fetch
 upf_bibliography/
 ├── config.json                       # active topic config (working copy)
 ├── make_dashboard.py                 # main entry point — builds all dashboards
-├── make_influence_report.py          # paper or author: corpus network + global influence map
+├── make_influence_report.py          # author / funder / project: corpus network + global influence map
 ├── bibliometrics.py                  # data retrieval from OpenAlex
 ├── build_all.sh                      # build and deploy all topics in one command
 ├── deploy.sh                         # rsync one topic's output to the web server
@@ -96,6 +130,11 @@ upf_bibliography/
 │
 ├── cache/                            # local API caches (not git-tracked)
 │   └── influence_cache.sqlite
+│
+├── reports/                          # influence reports — selectively committed
+│   ├── authors/{slug}/               # author_corpus.html, author_influence.html
+│   ├── funders/{slug}/               # funder_influence.html, funder_corpus.html
+│   └── projects/{slug}/              # project_influence.html, project_corpus.html
 │
 ├── scripts/                          # sub-scripts called by make_dashboard.py
 │   ├── make_citation_network.py
