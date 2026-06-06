@@ -62,6 +62,28 @@ See [section 4.2 of DOCS.md](DOCS.md#42-make_influence_reportpy) for the full CL
 
 ---
 
+## Print-quality PDF (A3)
+
+`make_influence_pdf.py` converts any `*_influence.html` from `make_influence_report.py`
+into a standalone A3 landscape PDF: timeline scatter (publication year × citation count),
+citation arrows, rotated labels with leader lines, and a numbered legend.
+
+```bash
+# Basic — reads title from HTML, writes author_influence_a3.pdf
+venv/bin/python3 make_influence_pdf.py reports/authors/kuhnle/author_influence.html
+
+# Press quality (300 DPI), custom output path
+venv/bin/python3 make_influence_pdf.py reports/authors/kuhnle/author_influence.html \
+    --dpi 300 --output kuhnle_a3.pdf
+
+# Show more citing papers; hide unlabelled focal badges
+venv/bin/python3 make_influence_pdf.py <file.html> --max-cite 200 --top-numbered 0
+```
+
+See [section 4.3 of DOCS.md](DOCS.md#43-make_influence_pdfpy) for the full CLI reference.
+
+---
+
 ## Building all topics at once
 
 ```bash
@@ -113,6 +135,7 @@ upf_bibliography/
 ├── config.json                       # active topic config (working copy)
 ├── make_dashboard.py                 # main entry point — builds all dashboards
 ├── make_influence_report.py          # author / funder / project: corpus network + global influence map
+├── make_influence_pdf.py             # print-quality A3 PDF from any *_influence.html
 ├── bibliometrics.py                  # data retrieval from OpenAlex
 ├── build_all.sh                      # build and deploy all topics in one command
 ├── deploy.sh                         # rsync one topic's output to the web server

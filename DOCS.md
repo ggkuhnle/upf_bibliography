@@ -18,6 +18,7 @@ operational detail. For a quick start see [README.md](README.md).
      - [Funder mode](#funder-mode)
      - [Project mode](#project-mode-nct--grant)
      - [Shared options](#shared-options)
+   - 4.3 [make_influence_pdf.py](#43-make_influence_pdfpy)
    - 4.4 [bibliometrics.py](#44-bibliometricspy)
    - 4.5 [build_all.sh](#45-build_allsh)
    - 4.6 [deploy.sh](#46-deploysh)
@@ -68,6 +69,7 @@ build_all.sh  ──loops over config/config.json.*──▶  make_dashboard.py
 
 Standalone tools (not called by make_dashboard):
   make_influence_report.py — paper / author / funder / project: corpus + global influence map
+  make_influence_pdf.py    — A3 print-quality PDF from any *_influence.html
   scripts/make_author_report.py  — per-author profile (corpus only)
   scripts/make_network_pdf.py    — print-ready PDF of citation network
 ```
@@ -87,6 +89,7 @@ upf_bibliography/
 │
 ├── make_dashboard.py           # main entry point
 ├── make_influence_report.py    # paper or author: corpus network + global influence (standalone)
+├── make_influence_pdf.py       # A3 print-quality PDF from any *_influence.html (standalone)
 ├── bibliometrics.py            # OpenAlex data retrieval
 ├── build_all.sh                # multi-topic build + deploy loop
 ├── deploy.sh                   # rsync one topic to the web server
@@ -375,8 +378,10 @@ two data sources:
 
 1. **ClinicalTrials.gov** — fetches the official linked publications (PMIDs) from the NCT
    record, then resolves them to OpenAlex works.
-2. **OpenAlex full-text search** — searches OpenAlex for papers that mention the NCT ID
-   in their title or abstract, catching papers not listed in ClinicalTrials.gov.
+2. **OpenAlex search** — searches OpenAlex for papers that mention the NCT ID in their
+   abstract (`abstract.search`) and in indexed full text (`fulltext.search`), catching
+   papers not listed in ClinicalTrials.gov. Full-text coverage is limited to open-access
+   papers with indexed body text.
 
 For grant-funded projects, OpenAlex is queried using `awards.funder_award_id`.
 
@@ -460,6 +465,83 @@ Layer order in the legend: cited (references) → citing n=1 → citing n=2.
 > Reduce these flags (or `--d2-seeds`) if the output HTML is too large to load comfortably.
 > Clearing `cache/influence_cache.sqlite` is only needed when you want to re-fetch data
 > that has been updated upstream in OpenAlex, not when changing these flags.
+
+---
+
+### 4.3 `make_influence_pdf.py`
+
+**Purpose:** Converts any `*_influence.html` produced by `make_influence_report.py`
+into a print-quality A3 landscape PDF. The output is a **timeline scatter plot** —
+publication year on the x-axis, citation count (log scale) on the y-axis — with
+role-coded colours, citation arrows, rotated text labels, and a numbered legend for
+unlabelled focal papers.
+
+This script is standalone: it reads the embedded `ELEMENTS` JSON from the HTML file
+and requires no internet connection or local data directory.
+
+```bash
+# Basic: reads title from HTML, writes <basename>_a3.pdf next to the HTML
+venv/bin/python3 make_influence_pdf.py reports/authors/kuhnle/author_influence.html
+
+# Custom output path and press-quality DPI
+venv/bin/python3 make_influence_pdf.py reports/authors/kuhnle/author_influence.html \
+    --output kuhnle_a3.pdf --dpi 300
+
+# Project influence map with custom title
+venv/bin/python3 make_influence_pdf.py reports/projects/nct02422745/project_influence.html \
+    --title "COSMOS Trial — Global Citation Influence" --top-labels 15
+
+# Show more citing papers; increase numbered legend to 60 entries
+venv/bin/python3 make_influence_pdf.py <file.html> --max-cite 200 --top-numbered 60
+```
+
+**CLI flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `html` | — | Path to the `*_influence.html` input file (positional, required) |
+| `--output` | `<basename>_a3.pdf` | Output PDF path |
+| `--title` | from `<title>` tag | Override the figure title text |
+| `--top-labels` | 20 | Maximum nodes to label with full rotated text + leader line |
+| `--top-numbered` | 40 | Focal papers to label with a number badge and legend entry |
+| `--max-focal` | 999 | Maximum focal papers shown (999 = all) |
+| `--max-cite` | 100 | Maximum citing-layer nodes (50 % top-cited + 50 % most-recent) |
+| `--max-ref` | 0 | Maximum cited-layer (reference) nodes; 0 = off |
+| `--max-d2` | 0 | Maximum layer-2 nodes; 0 = off |
+| `--dpi` | 200 | Resolution in DPI (200 = screen quality; 300 = print quality) |
+
+**Node selection:** Focal papers are always included up to `--max-focal`.
+Citing papers are selected with a **stratified** strategy: half the budget goes to
+the most-cited papers (established impact) and half to the most-recently-published
+(emerging work), with duplicates removed. This ensures recent papers are always
+represented even when older papers dominate by citation count.
+
+**Output layout:**
+
+- **Scatter plot area** — year × log(citations+1), with deterministic x-jitter to
+  separate papers published in the same year. Red stars = focal papers; purple
+  circles = citing papers (further layers hidden by default).
+- **Citation arrows** — semi-transparent purple arrows from each citing paper to
+  the focal paper(s) it cites.
+- **Rotated labels** — full text labels (author, year, journal) on the top-N nodes,
+  placed with a ggrepel-style iterative repulsion algorithm to minimise overlap.
+  Leader lines connect labels to their data points.
+- **Numbered badges** — focal papers beyond `--top-labels` receive a small numbered
+  badge instead of a full text label.
+- **Legend panel** — four-column table at the bottom of the figure listing all
+  numbered focal papers with short title, year, and citation count.
+
+**Node colours:**
+
+| Role | Colour | Meaning |
+|------|--------|---------|
+| `focal` / `author_paper` / `project_paper` / `funded_work` | red `#C0392B` | Focal papers |
+| `cites_*` | purple `#7C3AED` | Papers citing the focal subject |
+| `cited_by_*` | green `#047857` | References of the focal papers (off by default) |
+| `d2` | grey `#94a3b8` | Second-hop nodes (off by default) |
+
+**Output file:** Written to `--output` if specified; otherwise `<html_basename>_a3.pdf`
+in the same directory as the input HTML.
 
 ---
 
@@ -942,9 +1024,12 @@ networkx
 plotly
 kaleido
 python-louvain
+matplotlib
 ```
 
 Python 3.9 or later. No external API key is required.
+
+`matplotlib` is required only by `make_influence_pdf.py` and `scripts/make_network_pdf.py`.
 
 Optional: [Ollama](https://ollama.ai) running locally with a model such as
 `llama3.1`, used only by `make_author_report.py` for narrative generation.

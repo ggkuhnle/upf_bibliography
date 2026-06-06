@@ -1086,8 +1086,9 @@ def prepare_author_corpus_graph(papers_df, cit_edges, focal_ids,
 
 
 def _write_author_corpus_html(author_name, author_row, nodes, edges,
-                               search_index, output_path):
-    """Corpus influence map HTML for an author's body of work."""
+                               search_index, output_path, subject_type="author"):
+    """Corpus influence map HTML for an author's or project's body of work."""
+    subject_label = "Author" if subject_type == "author" else "Project"
     n_papers  = int(author_row.get("papers", 0) or 0)
     total_cit = int(author_row.get("citations", 0) or 0)
     pagerank  = author_row.get("pagerank", "")
@@ -1113,7 +1114,7 @@ def _write_author_corpus_html(author_name, author_row, nodes, edges,
 html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   font-size:13px;background:#f0f2f5;color:#222}}
 #app{{display:grid;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}}
-#topbar{{background:#1a252f;color:#fff;padding:.45rem 1rem;
+#topbar{{background:#1a1a2e;color:#fff;padding:.45rem 1rem;
   display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;flex-shrink:0}}
 #topbar h1{{font-size:.95rem;font-weight:600}}
 #topbar .meta{{font-size:.72rem;color:#95a5a6;white-space:nowrap}}
@@ -1197,7 +1198,7 @@ button.primary:hover{{background:#2c3e50}}
   <div id="sidebar">
 
     <div class="sec">
-      <h3>Author metrics</h3>
+      <h3>{subject_label} metrics</h3>
       <div class="chips">
         <div class="chip"><div class="cv">{n_papers}</div><div class="cl">Papers in corpus</div></div>
         <div class="chip"><div class="cv">{total_cit:,}</div><div class="cl">Total citations</div></div>
@@ -1209,12 +1210,12 @@ button.primary:hover{{background:#2c3e50}}
     <div class="sec">
       <h3>Ego depth</h3>
       <div class="depth-row">
-        <div class="dbtn" data-d="0">n=0<br><span style="font-size:.65rem;font-weight:400">author only</span></div>
+        <div class="dbtn" data-d="0">n=0<br><span style="font-size:.65rem;font-weight:400">{subject_label.lower()} only</span></div>
         <div class="dbtn active" data-d="1">n=1<br><span style="font-size:.65rem;font-weight:400">direct</span></div>
         <div class="dbtn" data-d="2">n=2<br><span style="font-size:.65rem;font-weight:400">2-hop</span></div>
       </div>
       <div class="tog-row">
-        <label class="tog"><input type="checkbox" id="show-corpus" checked>
+        <label class="tog"><input type="checkbox" id="show-corpus">
           <span class="tog-slider"></span></label>
         Show corpus background
       </div>
@@ -1241,7 +1242,7 @@ button.primary:hover{{background:#2c3e50}}
 
     <div class="sec">
       <h3>Legend</h3>
-      <div class="leg"><span class="leg-dot" style="background:#EF553B"></span>Author's papers</div>
+      <div class="leg"><span class="leg-dot" style="background:#EF553B"></span>{subject_label}'s papers</div>
       <div class="leg"><span class="leg-dot" style="background:#AB63FA"></span>Papers citing this work</div>
       <div class="leg"><span class="leg-dot" style="background:#00CC96"></span>Papers cited by this work</div>
       <div class="leg"><span class="leg-dot" style="background:#FFA15A"></span>Depth-2 neighbours</div>
@@ -1316,7 +1317,7 @@ const cy = cytoscape({{
   wheelSensitivity: 0.3,
 }});
 
-let currentDepth = 1, showCorpus = true, showLabels = false;
+let currentDepth = 1, showCorpus = false, showLabels = false;
 
 function applyYearFilter(y1, y2) {{
   cy.nodes().forEach(n => {{
@@ -1636,14 +1637,14 @@ def crawl(focal, depth, max_refs, max_cites, con):
     l1_fwd = _fetch_citers(focal["id"], con, max_cites)
     for w in l1_fwd:
         works[w["id"]] = w
-        edges_set.add((w["id"], focal["id"]))
+        edges_set.add((focal["id"], w["id"]))
     print(f"    {len(l1_fwd)} citers")
 
     print(f"  layer 1 backward — fetching up to {max_refs} references …")
     l1_bwd = _fetch_references(focal, con, max_refs)
     for w in l1_bwd:
         works[w["id"]] = w
-        edges_set.add((focal["id"], w["id"]))
+        edges_set.add((w["id"], focal["id"]))
     print(f"    {len(l1_bwd)} references")
 
     if depth >= 2:
@@ -1653,7 +1654,7 @@ def crawl(focal, depth, max_refs, max_cites, con):
             for w in _fetch_citers(seed["id"], con, 20):
                 if w["id"] not in works:
                     works[w["id"]] = w
-                edges_set.add((w["id"], seed["id"]))
+                edges_set.add((seed["id"], w["id"]))
 
         print(f"  layer 2 backward — scanning refs of {len(l1_bwd)} layer-1B nodes …")
         for seed in l1_bwd:
@@ -1663,14 +1664,14 @@ def crawl(focal, depth, max_refs, max_cites, con):
                     if w:
                         works[rid] = w
                 if rid in works:
-                    edges_set.add((seed["id"], rid))
+                    edges_set.add((rid, seed["id"]))
 
     all_ids = set(works.keys())
     added = 0
     for wid, w in works.items():
         for rid in (w.get("ref_ids") or []):
-            if rid in all_ids and rid != wid and (wid, rid) not in edges_set:
-                edges_set.add((wid, rid))
+            if rid in all_ids and rid != wid and (rid, wid) not in edges_set:
+                edges_set.add((rid, wid))
                 added += 1
     print(f"  cross-edges from metadata: +{added}")
 
@@ -1907,7 +1908,7 @@ td{{padding:.18rem .4rem;border-bottom:1px solid #f0f2f5;vertical-align:top}}
     <h2>Influence map — how to use</h2>
 
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from citing work → cited work.
+    <p>Each node is a published work; arrows point from cited work → citing work (influence direction).
     Node size reflects global citation count. Colour codes the node's role:</p>
     <table>
       <tr><td style="color:#EF553B">● Focal (red)</td><td>The paper you are exploring</td></tr>
@@ -2346,7 +2347,7 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
         citers = _fetch_citers(fw["id"], con, max_cites_per_paper)
         for w in citers:
             works[w["id"]] = w
-            edges_set.add((w["id"], fw["id"]))
+            edges_set.add((fw["id"], w["id"]))
             roles.setdefault(w["id"], "cites_author")
         total_fwd += len(citers)
     print(f"    {total_fwd} citer links across all author papers")
@@ -2359,7 +2360,7 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
         for w in refs:
             if w["id"] not in focal_ids:
                 works[w["id"]] = w
-                edges_set.add((fw["id"], w["id"]))
+                edges_set.add((w["id"], fw["id"]))
                 roles.setdefault(w["id"], "cited_by_author")
         total_bwd += len(refs)
     print(f"    {total_bwd} reference links across all author papers")
@@ -2375,7 +2376,7 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
                 if w["id"] not in works:
                     works[w["id"]] = w
                     roles.setdefault(w["id"], "d2")
-                edges_set.add((w["id"], seed["id"]))
+                edges_set.add((seed["id"], w["id"]))
 
 
     # Cross-edges within known works — source must not predate target
@@ -2385,12 +2386,12 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
     for wid, w in works.items():
         src_year = int(w.get("year") or 0)
         for rid in (w.get("ref_ids") or []):
-            if rid not in all_ids or rid == wid or (wid, rid) in edges_set:
+            if rid not in all_ids or rid == wid or (rid, wid) in edges_set:
                 continue
             tgt_year = int((works[rid].get("year") or 0))
             if tgt_year and src_year and src_year < tgt_year - 1:
-                continue  # source predates target by >1 year — skip bogus edge
-            edges_set.add((wid, rid))
+                continue  # rid (reference) predates wid by >1 year — skip bogus edge
+            edges_set.add((rid, wid))
             added += 1
     print(f"  cross-edges from metadata: +{added}")
 
@@ -2605,7 +2606,7 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
     <h2>Author influence map — how to use</h2>
 
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from citing work → cited work.
+    <p>Each node is a published work; arrows point from cited work → citing work (influence direction).
     Node size reflects global citation count. The author's own papers are shown as
     red stars; other nodes are coloured by their relationship to those papers:</p>
     <table>
@@ -2984,29 +2985,39 @@ def _pmids_to_openalex(pmids: list, con) -> list:
 
 
 def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
-    """Search OpenAlex for works that mention an NCT ID in title/abstract."""
-    works  = []
-    cursor = "*"
-    while len(works) < limit:
-        page_limit = min(PAGE_SIZE, limit - len(works))
-        time.sleep(REQUEST_DELAY)
-        data = _get(BASE_URL, {
-            "filter":   f'abstract.search:"{nct_id}"',
-            "sort":     "cited_by_count:desc",
-            "select":   _OA_SELECT_NOGRANTS,
-            "per-page": page_limit,
-            "cursor":   cursor,
-        })
-        results = data.get("results") or []
-        if not results:
-            break
-        for w in results:
-            meta = _extract_work(w)
-            _cache_put(con, meta["id"], meta)
-            works.append(meta)
-        cursor = (data.get("meta") or {}).get("next_cursor")
-        if not cursor:
-            break
+    """Search OpenAlex for works mentioning an NCT ID in abstract or full text."""
+    seen: set = set()
+    works: list = []
+
+    def _run_filter(flt: str, n: int) -> None:
+        cursor = "*"
+        fetched = 0
+        while fetched < n:
+            page_limit = min(PAGE_SIZE, n - fetched)
+            time.sleep(REQUEST_DELAY)
+            data = _get(BASE_URL, {
+                "filter":   flt,
+                "sort":     "cited_by_count:desc",
+                "select":   _OA_SELECT_NOGRANTS,
+                "per-page": page_limit,
+                "cursor":   cursor,
+            })
+            results = data.get("results") or []
+            if not results:
+                break
+            for w in results:
+                meta = _extract_work(w)
+                if meta["id"] not in seen:
+                    _cache_put(con, meta["id"], meta)
+                    works.append(meta)
+                    seen.add(meta["id"])
+            fetched += len(results)
+            cursor = (data.get("meta") or {}).get("next_cursor")
+            if not cursor:
+                break
+
+    _run_filter(f'abstract.search:"{nct_id}"', limit)
+    _run_filter(f'fulltext.search:"{nct_id}"', limit)
     return works
 
 
@@ -3736,7 +3747,7 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
     <button class="close-btn" id="help-close">✕</button>
     <h2>Funder influence map — how to use</h2>
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from citing → cited.
+    <p>Each node is a published work; arrows point from cited → citing (influence direction).
     Node size reflects global citation count. Hexagonal nodes are the top-cited
     works funded by <strong>{funder_name}</strong>:</p>
     <table>
@@ -4330,7 +4341,8 @@ def main():
                     dummy_row = {"papers": len(focal_wids), "citations": 0, "pagerank": ""}
                     _write_author_corpus_html(
                         project_info["name"], dummy_row, pn, pe_c, psi,
-                        os.path.join(out_dir, "project_corpus.html"))
+                        os.path.join(out_dir, "project_corpus.html"),
+                        subject_type="project")
                     corpus_written = True
                 else:
                     print("  No matches found — try a different --prefix.")

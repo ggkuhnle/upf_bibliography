@@ -278,6 +278,7 @@ def write_cytoscape_html(out, G_plot, author_lookup, partition, pos,
                           pagerank, edge_papers_map,
                           n_communities, generated_date, author_subclass=None,
                           author_funders=None, top_n=None,
+                          corpus_info="",
                           output_filename="citation_network_cytoscape.html"):
     """Write a fullscreen Cytoscape.js citation-network explorer.
 
@@ -1023,6 +1024,7 @@ document.addEventListener('DOMContentLoaded', function() {
   <div>
     <h1>{_TITLE} — Citation Network Explorer</h1>
     <p>{n_nodes:,} authors &middot; {n_edges:,} citation links &middot; {n_recip:,} mutual pairs &middot; {n_communities} research clusters &middot; Generated {generated_date}</p>
+    {f'<p style="font-size:.75rem;color:#8a9ab0;margin-top:2px">{corpus_info}</p>' if corpus_info else ''}
     <span style="display:none">hippo</span>
   </div>
   <div class="spacer"></div>
@@ -1198,9 +1200,23 @@ def main():
     cite_path    = os.path.join(data, _pf("citation_edges_author.csv"))
     author_path  = os.path.join(data, _pf("papers_by_author.csv"))
     by_year_path = os.path.join(data, _pf("citation_edges_author_by_year.csv"))
+    pby_year_path = os.path.join(data, _pf("papers_by_year.csv"))
 
     print("Loading data…")
     author_df = pd.read_csv(author_path)
+
+    # Total papers in corpus (from papers_by_year.csv if available)
+    _total_papers = 0
+    if os.path.exists(pby_year_path):
+        try:
+            _pby = pd.read_csv(pby_year_path)
+            _count_col = next((c for c in _pby.columns if c.lower() in ("count", "papers", "n", "n_papers")), None)
+            if _count_col:
+                _total_papers = int(_pby[_count_col].sum())
+        except Exception:
+            pass
+    _keywords     = _CFG.get("keywords", [])
+    _keywords_str = " · ".join(_keywords) if _keywords else ""
     # cite_df is loaded later in chunks after keep_set is known (can be 49M+ rows for large topics)
 
     has_year_data = os.path.exists(by_year_path)
@@ -1446,6 +1462,14 @@ def main():
     n_edges = G_plot.number_of_edges()
     n_recip = len(recip_set) // 2  # pairs
     generated_date = pd.Timestamp.now().strftime("%B %Y")
+
+    corpus_info = ""
+    if _total_papers:
+        corpus_info += f"{_total_papers:,} papers"
+    if year_min and year_max:
+        corpus_info += f" · {year_min}–{year_max}"
+    if _keywords_str:
+        corpus_info += f" · Search terms: {_keywords_str}"
 
     year_filter_html = ""
     if has_year_data and all_edge_years:
@@ -1737,6 +1761,7 @@ a{color:inherit}"""
     <span><b>{n_recip:,}</b> mutual citation pairs</span>
     <span><b>{n_communities}</b> research clusters</span>
   </div>
+  {f'<p class="note" style="margin-top:4px;color:#555"><strong>Corpus:</strong> {corpus_info}</p>' if corpus_info else ''}
   <p class="note">
     Each node is an author; A → B means at least one paper by A cites a paper by B
     <em>within this corpus</em>. Orange edges = mutual citations (A cites B and B cites A).
@@ -2160,6 +2185,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backgrou
         n_communities=n_communities, generated_date=generated_date,
         author_subclass=author_subclass or None,
         author_funders=author_funders or None,
+        corpus_info=corpus_info,
     )
 
     print("Writing compact citation network (top 200 nodes) …")
