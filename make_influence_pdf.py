@@ -241,7 +241,8 @@ def render(nodes, edges, title, output_path, top_labels, top_numbered, dpi):
     # Build id→(x,y) map for edge drawing
     id_to_xy = {nd["id"]: (xs[i], ys[i]) for i, nd in enumerate(valid)}
 
-    # ── Arrows: citing → focal ──
+    # ── Arrows: drawn source → target as serialized in the HTML elements,
+    # i.e. cited → citing (influence direction) ──
     for edge in edges:
         src = id_to_xy.get(edge.get("source"))
         tgt = id_to_xy.get(edge.get("target"))

@@ -42,6 +42,12 @@ import pandas as pd
 import requests
 from typing import Optional
 
+# Several writer functions use a local variable named `html` for the page
+# template, so the stdlib module must be imported under a different name.
+from html import escape as html_escape
+
+from openalex_client import MAILTO, PAGE_SIZE, WORKS_URL as BASE_URL, polite_get
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_DATA_BASE   = "data"
@@ -52,9 +58,6 @@ SMALL_MAX_EGO       = 40
 OLLAMA_URL        = "http://localhost:11434/api/generate"
 DEFAULT_LLM_MODEL = "llama3.1"
 
-MAILTO        = "ggkuhnle@googlemail.com"
-BASE_URL      = "https://api.openalex.org/works"
-PAGE_SIZE     = 200
 REQUEST_DELAY = 0.12
 MAX_RETRIES   = 5
 CACHE_FILE    = os.path.join(os.path.dirname(__file__), "cache", "influence_cache.sqlite")
@@ -63,6 +66,9 @@ DEFAULT_DEPTH     = 2
 DEFAULT_MAX_NODES = 300
 DEFAULT_MAX_REFS  = 50
 DEFAULT_MAX_CITES = 100
+
+# Single source of truth for the arrow convention shown in every map.
+ARROW_NOTE = "Arrows point from cited work → citing work (influence direction)."
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -254,10 +260,12 @@ def prepare_graph_data(papers_df, cit_edges, focal_id,
             "focal":      dep == 0,
         }})
 
+    # Arrows point cited → citing (influence direction), matching the
+    # crawl-based influence maps.
     edges = [{"data": {
         "id":     f"{r.citing_work_id}__{r.cited_work_id}",
-        "source": r.citing_work_id,
-        "target": r.cited_work_id,
+        "source": r.cited_work_id,
+        "target": r.citing_work_id,
     }} for r in edge_df.itertuples(index=False)]
 
     search_index = []
@@ -345,9 +353,9 @@ def _short(s, n=35):
 
 def _write_corpus_html(stats, nodes, edges, search_index, citing_papers, output_path,
                        llm_text=None, caveat_html=None):
-    title    = stats.get("title", "Unknown Paper")
+    title    = html_escape(str(stats.get("title", "Unknown Paper")))
     year     = stats.get("year", "")
-    jour     = stats.get("journal", "")
+    jour     = html_escape(str(stats.get("journal", "")))
     doi      = stats.get("doi", "")
     field    = stats.get("field", "")
     cit      = stats.get("citations", "?")
@@ -579,6 +587,7 @@ td.num{{text-align:right;font-variant-numeric:tabular-nums}}
       <div class="leg"><span class="leg-dot" style="background:#00CC96"></span>Papers cited by this work (depth 1)</div>
       <div class="leg"><span class="leg-dot" style="background:#FFA15A"></span>Depth-2 neighbours</div>
       <div class="leg"><span class="leg-dot" style="background:#b0bec5"></span>Corpus (background)</div>
+      <div style="font-size:.67rem;color:#999;margin-top:.3rem">{ARROW_NOTE}</div>
       <div style="font-size:.67rem;color:#999;margin-top:.3rem">{corpus_size_note} · node size ∝ log(citations)</div>
     </div>
 
@@ -1064,10 +1073,12 @@ def prepare_author_corpus_graph(papers_df, cit_edges, focal_ids,
             "focal":      dep == 0,
         }})
 
+    # Arrows point cited → citing (influence direction), matching the
+    # crawl-based influence maps.
     edges = [{"data": {
         "id":     f"{r.citing_work_id}__{r.cited_work_id}",
-        "source": r.citing_work_id,
-        "target": r.cited_work_id,
+        "source": r.cited_work_id,
+        "target": r.citing_work_id,
     }} for r in edge_df.itertuples(index=False)]
 
     search_index = []
@@ -1088,6 +1099,7 @@ def prepare_author_corpus_graph(papers_df, cit_edges, focal_ids,
 def _write_author_corpus_html(author_name, author_row, nodes, edges,
                                search_index, output_path, subject_type="author"):
     """Corpus influence map HTML for an author's or project's body of work."""
+    author_name   = html_escape(str(author_name))
     subject_label = "Author" if subject_type == "author" else "Project"
     n_papers  = int(author_row.get("papers", 0) or 0)
     total_cit = int(author_row.get("citations", 0) or 0)
@@ -1247,6 +1259,7 @@ button.primary:hover{{background:#2c3e50}}
       <div class="leg"><span class="leg-dot" style="background:#00CC96"></span>Papers cited by this work</div>
       <div class="leg"><span class="leg-dot" style="background:#FFA15A"></span>Depth-2 neighbours</div>
       <div class="leg"><span class="leg-dot" style="background:#b0bec5"></span>Corpus background</div>
+      <div style="font-size:.67rem;color:#999;margin-top:.3rem">{ARROW_NOTE}</div>
       <div style="font-size:.67rem;color:#999;margin-top:.3rem">{corpus_size_note}</div>
     </div>
 
@@ -1507,25 +1520,13 @@ def _cache_edges_get(con, work_id, direction):
 
 
 def _get(url, params):
-    params = {**params, "mailto": MAILTO}
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = requests.get(url, params=params, timeout=20)
-            if r.status_code == 429:
-                time.sleep(5 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            return r.json()
-        except requests.RequestException as exc:
-            if attempt == MAX_RETRIES - 1:
-                raise
-            time.sleep(REQUEST_DELAY * 2 ** attempt)
-    return {}
+    return polite_get(url, params, retries=MAX_RETRIES, timeout=20, rate_wait=5)
 
 
+# Note: "grants" is not a selectable field in the OpenAlex works API, so
+# funder metadata is only present on full-object (no-select) fetches.
 _OA_SELECT = ("id,doi,title,publication_year,cited_by_count,"
               "primary_location,topics,authorships,referenced_works")
-_OA_SELECT_NOGRANTS = _OA_SELECT  # grants not supported in select; kept as alias
 
 
 def _extract_work(w):
@@ -1571,13 +1572,15 @@ def _fetch_work(work_id, con) -> Optional[dict]:
 
 
 def _fetch_by_doi(doi, con) -> Optional[dict]:
-    doi_clean = doi.strip().lstrip("https://doi.org/")
-    row = con.execute("SELECT data_json FROM works WHERE data_json LIKE ?",
-                      (f'%"doi":"{doi_clean}"%',)).fetchone()
+    doi_clean = doi.strip().removeprefix("https://doi.org/").removeprefix("doi.org/")
+    # Escape LIKE wildcards: DOIs frequently contain underscores.
+    like_doi = doi_clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    row = con.execute("SELECT data_json FROM works WHERE data_json LIKE ? ESCAPE '\\'",
+                      (f'%"doi":"{like_doi}"%',)).fetchone()
     if row:
         return json.loads(row[0])
     time.sleep(REQUEST_DELAY)
-    data = _get(BASE_URL, {"filter": f"doi:{doi_clean}", "select": _OA_SELECT_NOGRANTS})
+    data = _get(BASE_URL, {"filter": f"doi:{doi_clean}", "select": _OA_SELECT})
     results = data.get("results", [])
     if not results:
         return None
@@ -1605,10 +1608,11 @@ def _fetch_citers(work_id, con, limit):
     cursor = "*"
     while len(citers) < limit:
         page_limit = min(PAGE_SIZE, limit - len(citers))
+        time.sleep(REQUEST_DELAY)
         data = _get(BASE_URL, {
             "filter":   f"cites:{work_id.split('/')[-1]}",
             "sort":     "cited_by_count:desc",
-            "select":   _OA_SELECT_NOGRANTS,
+            "select":   _OA_SELECT,
             "per-page": page_limit,
             "cursor":   cursor,
         })
@@ -1619,7 +1623,6 @@ def _fetch_citers(work_id, con, limit):
             meta = _extract_work(w)
             _cache_put(con, meta["id"], meta)
             citers.append(meta)
-            time.sleep(REQUEST_DELAY)
         cursor = (data.get("meta") or {}).get("next_cursor")
         if not cursor:
             break
@@ -1630,6 +1633,8 @@ def _fetch_citers(work_id, con, limit):
 
 
 def crawl(focal, depth, max_refs, max_cites, con):
+    # Edges are stored canonically as (citing, cited); the rendering layer
+    # flips them so arrows show influence direction (cited → citing).
     works     = {focal["id"]: focal}
     edges_set = set()
 
@@ -1637,14 +1642,14 @@ def crawl(focal, depth, max_refs, max_cites, con):
     l1_fwd = _fetch_citers(focal["id"], con, max_cites)
     for w in l1_fwd:
         works[w["id"]] = w
-        edges_set.add((focal["id"], w["id"]))
+        edges_set.add((w["id"], focal["id"]))
     print(f"    {len(l1_fwd)} citers")
 
     print(f"  layer 1 backward — fetching up to {max_refs} references …")
     l1_bwd = _fetch_references(focal, con, max_refs)
     for w in l1_bwd:
         works[w["id"]] = w
-        edges_set.add((w["id"], focal["id"]))
+        edges_set.add((focal["id"], w["id"]))
     print(f"    {len(l1_bwd)} references")
 
     if depth >= 2:
@@ -1654,7 +1659,7 @@ def crawl(focal, depth, max_refs, max_cites, con):
             for w in _fetch_citers(seed["id"], con, 20):
                 if w["id"] not in works:
                     works[w["id"]] = w
-                edges_set.add((seed["id"], w["id"]))
+                edges_set.add((w["id"], seed["id"]))
 
         print(f"  layer 2 backward — scanning refs of {len(l1_bwd)} layer-1B nodes …")
         for seed in l1_bwd:
@@ -1664,14 +1669,14 @@ def crawl(focal, depth, max_refs, max_cites, con):
                     if w:
                         works[rid] = w
                 if rid in works:
-                    edges_set.add((rid, seed["id"]))
+                    edges_set.add((seed["id"], rid))
 
     all_ids = set(works.keys())
     added = 0
     for wid, w in works.items():
         for rid in (w.get("ref_ids") or []):
-            if rid in all_ids and rid != wid and (rid, wid) not in edges_set:
-                edges_set.add((rid, wid))
+            if rid in all_ids and rid != wid and (wid, rid) not in edges_set:
+                edges_set.add((wid, rid))
                 added += 1
     print(f"  cross-edges from metadata: +{added}")
 
@@ -1712,6 +1717,13 @@ def trim_graph(focal_id, works, edges, max_nodes, roles):
     trimmed_edges = [(s, t) for s, t in trimmed_edges if s in keep and t in keep]
     trimmed_roles = {wid: roles.get(wid, "d2") for wid in keep}
     return trimmed_works, trimmed_edges, trimmed_roles
+
+
+def _influence_cy_edges(edges):
+    """Serialize canonical (citing, cited) edges for Cytoscape, flipped so
+    arrows point cited → citing (influence direction)."""
+    return [{"data": {"id": f"{citing}__{cited}", "source": cited, "target": citing}}
+            for citing, cited in edges]
 
 
 _FIELD_COLORS = [
@@ -1768,12 +1780,11 @@ def _write_influence_html(focal_id, works, edges, roles, output_path):
             "size":        size,
         }})
 
-    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
-                for s, t in edges]
+    cy_edges = _influence_cy_edges(edges)
     elements_json   = json.dumps(nodes + cy_edges, separators=(",", ":"))
     field_colors_json = json.dumps(field_map)
 
-    focal_title = (focal.get("title") or "Unknown")[:80]
+    focal_title = html_escape((focal.get("title") or "Unknown")[:80])
     focal_year  = focal.get("year") or ""
     focal_cit   = focal.get("cit") or 0
     focal_doi   = focal.get("doi") or ""
@@ -1908,7 +1919,7 @@ td{{padding:.18rem .4rem;border-bottom:1px solid #f0f2f5;vertical-align:top}}
     <h2>Influence map — how to use</h2>
 
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from cited work → citing work (influence direction).
+    <p>Each node is a published work. {ARROW_NOTE}
     Node size reflects global citation count. Colour codes the node's role:</p>
     <table>
       <tr><td style="color:#EF553B">● Focal (red)</td><td>The paper you are exploring</td></tr>
@@ -2308,7 +2319,7 @@ def _fetch_author_works_openalex(author_id: str, con, limit: int = 500) -> list:
         data = _get(BASE_URL, {
             "filter":   f"authorships.author.id:{full_id}",
             "sort":     "cited_by_count:desc",
-            "select":   _OA_SELECT_NOGRANTS,
+            "select":   _OA_SELECT,
             "per-page": page_limit,
             "cursor":   cursor,
         })
@@ -2335,6 +2346,8 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
       cited_by_author — paper cited by ≥1 author paper
       d2            — depth-2 neighbour
     """
+    # Edges are stored canonically as (citing, cited); the rendering layer
+    # flips them so arrows show influence direction (cited → citing).
     focal_ids = {w["id"] for w in focal_works}
     works: dict = {w["id"]: w for w in focal_works}
     edges_set: set = set()
@@ -2347,7 +2360,7 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
         citers = _fetch_citers(fw["id"], con, max_cites_per_paper)
         for w in citers:
             works[w["id"]] = w
-            edges_set.add((fw["id"], w["id"]))
+            edges_set.add((w["id"], fw["id"]))
             roles.setdefault(w["id"], "cites_author")
         total_fwd += len(citers)
     print(f"    {total_fwd} citer links across all author papers")
@@ -2360,7 +2373,7 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
         for w in refs:
             if w["id"] not in focal_ids:
                 works[w["id"]] = w
-                edges_set.add((w["id"], fw["id"]))
+                edges_set.add((fw["id"], w["id"]))
                 roles.setdefault(w["id"], "cited_by_author")
         total_bwd += len(refs)
     print(f"    {total_bwd} reference links across all author papers")
@@ -2376,22 +2389,23 @@ def _crawl_author(focal_works: list, depth: int, max_refs: int,
                 if w["id"] not in works:
                     works[w["id"]] = w
                     roles.setdefault(w["id"], "d2")
-                edges_set.add((seed["id"], w["id"]))
+                edges_set.add((w["id"], seed["id"]))
 
 
-    # Cross-edges within known works — source must not predate target
-    # (guards against OpenAlex referenced_works errors and preprint dating mismatches)
+    # Cross-edges within known works — the citing work must not predate the
+    # cited reference (guards against OpenAlex referenced_works errors and
+    # preprint dating mismatches)
     all_ids = set(works.keys())
     added = 0
     for wid, w in works.items():
-        src_year = int(w.get("year") or 0)
+        citing_year = int(w.get("year") or 0)
         for rid in (w.get("ref_ids") or []):
-            if rid not in all_ids or rid == wid or (rid, wid) in edges_set:
+            if rid not in all_ids or rid == wid or (wid, rid) in edges_set:
                 continue
-            tgt_year = int((works[rid].get("year") or 0))
-            if tgt_year and src_year and src_year < tgt_year - 1:
-                continue  # rid (reference) predates wid by >1 year — skip bogus edge
-            edges_set.add((rid, wid))
+            ref_year = int((works[rid].get("year") or 0))
+            if ref_year and citing_year and citing_year < ref_year - 1:
+                continue  # cited work postdates the citing work by >1 year — skip bogus edge
+            edges_set.add((wid, rid))
             added += 1
     print(f"  cross-edges from metadata: +{added}")
 
@@ -2492,13 +2506,12 @@ def _write_author_influence_html(author_info: dict, focal_ids: set,
             "size":        size,
         }})
 
-    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
-                for s, t in edges]
+    cy_edges = _influence_cy_edges(edges)
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
 
-    author_name   = author_info.get("name", "Author")
+    author_name   = html_escape(author_info.get("name", "Author"))
     works_count   = author_info.get("works_count", len(focal_ids))
     cited_total   = author_info.get("cited_by_count", 0)
     orcid         = author_info.get("orcid", "")
@@ -2606,7 +2619,7 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
     <h2>Author influence map — how to use</h2>
 
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from cited work → citing work (influence direction).
+    <p>Each node is a published work. {ARROW_NOTE}
     Node size reflects global citation count. The author's own papers are shown as
     red stars; other nodes are coloured by their relationship to those papers:</p>
     <table>
@@ -2974,7 +2987,7 @@ def _pmids_to_openalex(pmids: list, con) -> list:
         time.sleep(REQUEST_DELAY)
         data = _get(PMID_BASE, {
             "filter":   "ids.pmid:" + "|".join(batch),
-            "select":   _OA_SELECT_NOGRANTS,
+            "select":   _OA_SELECT,
             "per-page": 50,
         })
         for w in data.get("results", []):
@@ -2985,7 +2998,11 @@ def _pmids_to_openalex(pmids: list, con) -> list:
 
 
 def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
-    """Search OpenAlex for works mentioning an NCT ID in abstract or full text."""
+    """Search OpenAlex for works mentioning an NCT ID in abstract or full text.
+
+    Runs abstract.search first, then tops up from fulltext.search (open-access
+    works with indexed body text only). Returns at most `limit` unique works.
+    """
     seen: set = set()
     works: list = []
 
@@ -2998,7 +3015,7 @@ def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
             data = _get(BASE_URL, {
                 "filter":   flt,
                 "sort":     "cited_by_count:desc",
-                "select":   _OA_SELECT_NOGRANTS,
+                "select":   _OA_SELECT,
                 "per-page": page_limit,
                 "cursor":   cursor,
             })
@@ -3017,7 +3034,9 @@ def _search_nct_openalex(nct_id: str, con, limit: int = 200) -> list:
                 break
 
     _run_filter(f'abstract.search:"{nct_id}"', limit)
-    _run_filter(f'fulltext.search:"{nct_id}"', limit)
+    remaining = limit - len(works)
+    if remaining > 0:
+        _run_filter(f'fulltext.search:"{nct_id}"', remaining)
     return works
 
 
@@ -3031,7 +3050,7 @@ def _fetch_award_papers(award_id: str, con, limit: int = 200) -> list:
         data = _get(BASE_URL, {
             "filter":   f"awards.funder_award_id:{award_id}",
             "sort":     "cited_by_count:desc",
-            "select":   _OA_SELECT_NOGRANTS,
+            "select":   _OA_SELECT,
             "per-page": page_limit,
             "cursor":   cursor,
         })
@@ -3091,8 +3110,7 @@ def _write_project_influence_html(project_info: dict, focal_ids: set,
             "size":        size,
         }})
 
-    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
-                for s, t in edges]
+    cy_edges = _influence_cy_edges(edges)
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
@@ -3106,7 +3124,7 @@ def _write_project_influence_html(project_info: dict, focal_ids: set,
     n_refs     = role_counts.get("cited_by_project", 0)
     n_d2       = role_counts.get("d2", 0)
 
-    proj_name  = project_info.get("name", "Project")
+    proj_name  = html_escape(project_info.get("name", "Project"))
     proj_id    = project_info.get("id", "")
     proj_type  = project_info.get("type", "award")
     proj_desc  = project_info.get("description", "")
@@ -3507,25 +3525,15 @@ def _fetch_funder_works_openalex(funder_id: str, con, limit: int = 50,
 
     for flt in filter_candidates:
         print(f"  trying filter: {flt}")
-        # Probe with no select to confirm filter is valid before adding select fields
-        _, filter_ok, reason = _try_fetch(flt, sel=None)
+        # Fetch without select: grants is not a selectable field, so only a
+        # full-object fetch preserves funder metadata.
+        works, ok, reason = _try_fetch(flt, sel=None)
         if reason == "400":
             print(f"    filter itself returns 400 — skipping")
             continue
         if reason == "empty":
             print(f"    filter valid but 0 results — skipping")
             continue
-        # Filter works — now try with full select, fall back to minimal
-        works, ok, reason = _try_fetch(flt, _OA_SELECT_NOGRANTS)
-        if reason == "400":
-            print(f"    full select returned 400; retrying with minimal select …")
-            works, ok, reason = _try_fetch(flt, _OA_SELECT_MINIMAL)
-            if reason == "400":
-                print(f"    minimal select also 400; using no-select fetch …")
-                works, ok, _ = _try_fetch(flt, sel=None)
-            if ok and works:
-                print(f"    enriching {len(works)} works with full metadata …")
-                works = [_fetch_work(w["id"], con) or w for w in works]
         if works:
             print(f"  found {len(works)} works via {flt}")
             return works
@@ -3539,7 +3547,7 @@ def _fetch_funder_works_openalex(funder_id: str, con, limit: int = 50,
     if inst_id:
         inst_filter = f"authorships.institutions.id:{inst_id}"
         print(f"  trying institution filter: {inst_filter}")
-        works, ok, reason = _try_fetch(inst_filter, _OA_SELECT_NOGRANTS)
+        works, ok, reason = _try_fetch(inst_filter, _OA_SELECT)
         if reason == "400":
             works, ok, _ = _try_fetch(inst_filter, _OA_SELECT_MINIMAL)
             if ok and works:
@@ -3637,13 +3645,12 @@ def _write_funder_influence_html(funder_info: dict, focal_ids: set,
             "size":        size,
         }})
 
-    cy_edges = [{"data": {"id": f"{s}__{t}", "source": s, "target": t}}
-                for s, t in edges]
+    cy_edges = _influence_cy_edges(edges)
     elements_json     = json.dumps(nodes + cy_edges, separators=(",", ":"))
     focal_ids_json    = json.dumps(list(focal_ids))
     field_colors_json = json.dumps(field_map)
 
-    funder_name   = funder_info.get("name", "Funder")
+    funder_name   = html_escape(funder_info.get("name", "Funder"))
     works_count   = funder_info.get("works_count", 0)
     grants_count  = funder_info.get("grants_count", 0)
     description   = funder_info.get("description", "")
@@ -3747,7 +3754,7 @@ html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',A
     <button class="close-btn" id="help-close">✕</button>
     <h2>Funder influence map — how to use</h2>
     <h3>What this graph shows</h3>
-    <p>Each node is a published work; arrows point from cited → citing (influence direction).
+    <p>Each node is a published work. {ARROW_NOTE}
     Node size reflects global citation count. Hexagonal nodes are the top-cited
     works funded by <strong>{funder_name}</strong>:</p>
     <table>

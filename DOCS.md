@@ -521,8 +521,8 @@ represented even when older papers dominate by citation count.
 - **Scatter plot area** — year × log(citations+1), with deterministic x-jitter to
   separate papers published in the same year. Red stars = focal papers; purple
   circles = citing papers (further layers hidden by default).
-- **Citation arrows** — semi-transparent purple arrows from each citing paper to
-  the focal paper(s) it cites.
+- **Citation arrows** — semi-transparent purple arrows from each focal paper to
+  the papers that cite it (influence direction, matching the HTML maps).
 - **Rotated labels** — full text labels (author, year, journal) on the top-N nodes,
   placed with a ggrepel-style iterative repulsion algorithm to minimise overlap.
   Leader lines connect labels to their data points.

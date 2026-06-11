@@ -28,6 +28,8 @@ from typing import Optional
 
 import requests
 
+from openalex_client import MAILTO, PAGE_SIZE, WORKS_URL as BASE_URL, polite_get
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 def _load_config() -> dict:
@@ -49,9 +51,6 @@ DEFAULT_TERMS = _CFG.get("keywords", [
     "NOVA food classification",
 ])
 DEFAULT_DATA_DIR = "data"
-MAILTO = "g.kuhnle@reading.ac.uk"
-BASE_URL = "https://api.openalex.org/works"
-PAGE_SIZE = 200          # OpenAlex max per-cursor page
 REQUEST_DELAY = 1.0      # seconds between paginated requests
 MAX_RETRIES = 12
 RETRY_BACKOFF = 2.0      # exponential backoff base (seconds) — used for network errors only
@@ -88,37 +87,21 @@ def _session() -> requests.Session:
     return s
 
 
+def _quota_exit(retry_after: int) -> None:
+    # Daily quota exhausted — Retry-After points to midnight reset
+    hrs  = retry_after // 3600
+    mins = (retry_after % 3600) // 60
+    log.warning(
+        "Daily API quota reached (Retry-After: %ds ≈ %dh %dm). "
+        "Checkpoint saved — restart tomorrow to continue.",
+        retry_after, hrs, mins,
+    )
+    raise SystemExit(0)
+
+
 def _get(session: requests.Session, url: str, params: dict, retries: int = MAX_RETRIES) -> dict:
-    """GET with retry.  429s use a long linear backoff; network/5xx use exponential backoff."""
-    for attempt in range(1, retries + 1):
-        try:
-            resp = session.get(url, params=params, timeout=30)
-            if resp.status_code == 429:
-                retry_after_raw = int(resp.headers.get("Retry-After", 0))
-                if retry_after_raw > 600:
-                    # Daily quota exhausted — Retry-After points to midnight reset
-                    hrs  = retry_after_raw // 3600
-                    mins = (retry_after_raw % 3600) // 60
-                    log.warning(
-                        "Daily API quota reached (Retry-After: %ds ≈ %dh %dm). "
-                        "Checkpoint saved — restart tomorrow to continue.",
-                        retry_after_raw, hrs, mins,
-                    )
-                    raise SystemExit(0)
-                retry_after = min(retry_after_raw, 120)  # ignore absurd values
-                wait = max(retry_after, min(60 * attempt, 600))  # 60s, 120s … cap at 600s
-                log.warning("Rate-limited (429); waiting %.0fs before retry %d/%d", wait, attempt, retries)
-                time.sleep(wait)
-                continue
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as exc:
-            wait = RETRY_BACKOFF ** attempt
-            log.warning("Request error: %s — retry %d/%d in %.0fs", exc, attempt, retries, wait)
-            if attempt == retries:
-                raise
-            time.sleep(wait)
-    raise RuntimeError("Exhausted retries")  # unreachable, but satisfies type checkers
+    return polite_get(url, params, session=session, retries=retries, timeout=30,
+                      rate_wait=60, err_backoff=RETRY_BACKOFF, on_quota=_quota_exit)
 
 
 def build_filter(terms: list[str]) -> str:

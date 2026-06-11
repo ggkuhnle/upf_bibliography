@@ -13,6 +13,7 @@ Writes:
 """
 
 import argparse
+import html as _html
 import json as _json
 import os
 from collections import Counter, defaultdict
@@ -34,7 +35,7 @@ def _load_cfg():
 
 _CFG    = _load_cfg()
 _PREFIX = _CFG.get("prefix", "")
-_TITLE  = _CFG.get("title", "Research")
+_TITLE  = _html.escape(_CFG.get("title", "Research"))
 
 
 def _pf(name):
@@ -1213,10 +1214,10 @@ def main():
             _count_col = next((c for c in _pby.columns if c.lower() in ("count", "papers", "n", "n_papers")), None)
             if _count_col:
                 _total_papers = int(_pby[_count_col].sum())
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  warning: could not read {pby_year_path} ({exc}) — corpus subtitle will omit paper count")
     _keywords     = _CFG.get("keywords", [])
-    _keywords_str = " · ".join(_keywords) if _keywords else ""
+    _keywords_str = _html.escape(" · ".join(_keywords)) if _keywords else ""
     # cite_df is loaded later in chunks after keep_set is known (can be 49M+ rows for large topics)
 
     has_year_data = os.path.exists(by_year_path)
